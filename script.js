@@ -33,46 +33,53 @@ let LOCATION_DATA     = {};
 let deferredPrompt    = null;
 
 // ============================================
-// SCHOOL KEY HELPER
+// CACHE IMAGES FOR OFFLINE USE
 // ============================================
-function makeSchoolKey(district, chiefdom, section, facility, community, school) {
-    return [district, chiefdom, section, facility, community, school]
-        .map(s => (s || '').trim().toLowerCase())
-        .join('|');
-}
-
-function isSchoolSubmitted(key) {
-    return state.submittedSchools.some(s => s.key === key);
-}
-
-function getSubmittedRecord(key) {
-    return state.submittedSchools.find(s => s.key === key) || null;
-}
-
-// Build flat list of ALL schools in current LOCATION_DATA
-function getAllAssignedSchools() {
-    const schools = [];
-    const data = state.isAdmin ? ALL_LOCATION_DATA : LOCATION_DATA;
-    for (const d in data)
-        for (const c in data[d])
-            for (const s in data[d][c])
-                for (const f in data[d][c][s])
-                    for (const com in data[d][c][s][f])
-                        data[d][c][s][f][com].forEach(sch => {
-                            schools.push({ district: d, chiefdom: c, section: s,
-                                           facility: f, community: com, school_name: sch,
-                                           key: makeSchoolKey(d, c, s, f, com, sch) });
-                        });
-    return schools;
+function cacheImagesForOffline() {
+    const imagesToCache = [
+        'ICF-SL.jpg',
+        'logo_mohs.png',
+        'logo_nmcp.png',
+        'logo_pmi.png',
+        'infographics.png',
+        'favicon.svg',
+        'icon-192.svg'
+    ];
+    
+    if ('caches' in window) {
+        caches.open('itn-images-v1').then(cache => {
+            imagesToCache.forEach(imageUrl => {
+                fetch(imageUrl, { mode: 'no-cors' })
+                    .then(response => {
+                        if (response.ok) cache.put(imageUrl, response);
+                    })
+                    .catch(() => {
+                        // If image fails to fetch, try with GitHub fallback URLs
+                        const fallbackUrls = {
+                            'ICF-SL.jpg': 'https://github.com/mohamedsillahkanu/gdp-dashboard-2/raw/6c7463b0d5c3be150aafae695a4bcbbd8aeb1499/ICF-SL.jpg',
+                            'infographics.png': 'https://raw.githubusercontent.com/mohamedsillahkanu/gdp-dashboard-2/main/infographics.png'
+                        };
+                        if (fallbackUrls[imageUrl]) {
+                            fetch(fallbackUrls[imageUrl], { mode: 'no-cors' })
+                                .then(fbResponse => {
+                                    if (fbResponse.ok) cache.put(imageUrl, fbResponse);
+                                })
+                                .catch(err => console.warn('Could not cache fallback for', imageUrl, err));
+                        }
+                    });
+            });
+        });
+    }
 }
 
 // ============================================
-// PWA SERVICE WORKER
+// PWA SERVICE WORKER WITH IMAGE CACHING
 // ============================================
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
         navigator.serviceWorker.register('./sw.js')
             .then(reg => {
+                console.log('[PWA] Service Worker registered');
                 reg.addEventListener('updatefound', () => {
                     const nw = reg.installing;
                     nw.addEventListener('statechange', () => {
@@ -80,9 +87,22 @@ if ('serviceWorker' in navigator) {
                             showNotification('New version available! Refresh to update.', 'info');
                     });
                 });
+                
+                // Cache images after SW registration
+                cacheImagesForOffline();
             })
             .catch(err => console.error('[PWA] SW registration failed:', err));
     });
+}
+
+// Update sw.js content to include image caching
+function updateServiceWorkerForImages() {
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+            type: 'CACHE_IMAGES',
+            images: ['ICF-SL.jpg', 'logo_mohs.png', 'logo_nmcp.png', 'logo_pmi.png', 'infographics.png']
+        });
+    }
 }
 
 // ============================================
@@ -128,6 +148,8 @@ async function updateApp() {
             const names = await caches.keys();
             for (const n of names) await caches.delete(n);
         }
+        // Recache images after update
+        setTimeout(() => cacheImagesForOffline(), 500);
         showNotification('Update complete! Reloading...', 'success');
         setTimeout(() => window.location.reload(true), 1000);
     } catch (err) {
@@ -174,8 +196,26 @@ function setDefaultDate() {
     if (d && !d.value) d.value = today;
 }
 
+// Format date properly for display
+function formatDate(dateString) {
+    if (!dateString) return '—';
+    try {
+        const date = new Date(dateString);
+        if (isNaN(date.getTime())) return dateString;
+        return date.toLocaleString('en-SL', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (e) {
+        return dateString;
+    }
+}
+
 // ============================================
-// INJECT SUMMARY MODAL (so HTML doesn't need editing now)
+// INJECT SUMMARY MODAL
 // ============================================
 function injectSummaryModal() {
     if (document.getElementById('summaryModal')) return;
@@ -227,6 +267,8 @@ function showLoginScreen() {
 function hideLoginScreen() {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appMain').style.display = 'block';
+    // Cache images after login
+    cacheImagesForOffline();
 }
 
 function handleLogin() {
@@ -279,7 +321,7 @@ function startApp(displayName, isAdmin) {
     setupEventListeners();
     populateDistricts();
     setupCascading();
-    setupSchoolSubmissionCheck();   // ← new: block already-submitted schools
+    setupSchoolSubmissionCheck();
     setupValidation();
     setupPhoneValidation();
     setupNameValidation();
@@ -479,7 +521,6 @@ function clearCount(id) {
 
 // ============================================
 // SCHOOL SUBMISSION CHECK
-// Listen on school_name change — if already submitted, warn + block form
 // ============================================
 function setupSchoolSubmissionCheck() {
     const schoolSel = document.getElementById('school_name');
@@ -491,10 +532,8 @@ function setupSchoolSubmissionCheck() {
 
         const banner = document.getElementById('schoolSubmittedBanner');
         if (isSchoolSubmitted(key)) {
-            // Show inline warning banner (injected if not present)
             if (!banner) injectSubmittedBanner();
             document.getElementById('schoolSubmittedBanner').style.display = 'flex';
-            // Lock Next button in section 2
             const nextBtn = document.querySelector('.form-section[data-section="2"] .btn-next');
             if (nextBtn) {
                 nextBtn.disabled = true;
@@ -526,7 +565,6 @@ function injectSubmittedBanner() {
              style="color:#004080;font-weight:600;text-decoration:underline;">View submission details</a>
         </div>
       </div>`;
-    // Insert before nav buttons
     const nav = section2.querySelector('.navigation-buttons');
     if (nav) section2.insertBefore(banner, nav);
     else section2.appendChild(banner);
@@ -549,7 +587,7 @@ function currentSchoolKey() {
 }
 
 // ============================================
-// SUMMARY MODAL
+// SUMMARY MODAL - Updated with green submitted, progress by distributor, centered text
 // ============================================
 function updateSummaryBadge() {
     const btn = document.getElementById('viewSummaryBtn');
@@ -557,7 +595,6 @@ function updateSummaryBadge() {
     const all       = getAllAssignedSchools();
     const submitted = all.filter(s => isSchoolSubmitted(s.key)).length;
     const remaining = all.length - submitted;
-    // Update badge on button if it exists
     let badge = btn.querySelector('.summary-badge');
     if (!badge) {
         badge = document.createElement('span');
@@ -580,130 +617,138 @@ function openSummaryModal() {
 
     const pct = total > 0 ? Math.round((submitted.length / total) * 100) : 0;
 
-    // Group pending by district for overview
-    const byDistrict = {};
+    // Progress by DISTRIBUTOR (submitted_by) instead of district
+    const byDistributor = {};
     all.forEach(s => {
-        if (!byDistrict[s.district]) byDistrict[s.district] = { total: 0, submitted: 0 };
-        byDistrict[s.district].total++;
-        if (isSchoolSubmitted(s.key)) byDistrict[s.district].submitted++;
+        const rec = getSubmittedRecord(s.key);
+        const distributor = rec?.data?.submitted_by || 'Pending';
+        if (!byDistributor[distributor]) {
+            byDistributor[distributor] = { total: 0, submitted: 0 };
+        }
+        byDistributor[distributor].total++;
+        if (isSchoolSubmitted(s.key)) byDistributor[distributor].submitted++;
     });
 
-    let districtRows = '';
-    Object.entries(byDistrict).sort().forEach(([d, v]) => {
+    let distributorRows = '';
+    Object.entries(byDistributor).sort().forEach(([d, v]) => {
         const dpct = Math.round((v.submitted / v.total) * 100);
-        districtRows += `
+        distributorRows += `
           <tr>
-            <td style="font-weight:600;">${d}</td>
-            <td>${v.total}</td>
-            <td style="color:#28a745;font-weight:700;">${v.submitted}</td>
-            <td style="color:#dc3545;font-weight:700;">${v.total - v.submitted}</td>
-            <td>
-              <div style="background:#e9ecef;border-radius:4px;height:10px;min-width:80px;overflow:hidden;">
-                <div style="background:${dpct===100?'#28a745':'#004080'};height:100%;width:${dpct}%;transition:width .3s;"></div>
+            <td style="font-weight:600; text-align:left;">${d}</td>
+            <td style="text-align:center;">${v.total}</td>
+            <td style="text-align:center; color:#28a745; font-weight:700;">${v.submitted}</td>
+            <td style="text-align:center; color:#dc3545; font-weight:700;">${v.total - v.submitted}</td>
+            <td style="text-align:center;">
+              <div style="background:#e9ecef; border-radius:4px; height:10px; width:100px; overflow:hidden; margin:0 auto;">
+                <div style="background:${dpct===100?'#28a745':'#004080'}; height:100%; width:${dpct}%; transition:width .3s;"></div>
               </div>
-              <span style="font-size:10px;font-weight:700;color:${dpct===100?'#28a745':'#004080'}">${dpct}%</span>
+              <span style="font-size:10px; font-weight:700; color:${dpct===100?'#28a745':'#004080'};">${dpct}%</span>
             </td>
           </tr>`;
     });
 
-    // School list — submitted (red), pending (default)
+    // School list with more space and centered text
     let schoolRows = '';
     all.sort((a, b) => a.district.localeCompare(b.district) || a.school_name.localeCompare(b.school_name))
        .forEach(s => {
            const done = isSchoolSubmitted(s.key);
            const rec  = getSubmittedRecord(s.key);
-           const when = rec ? new Date(rec.timestamp).toLocaleString() : '';
+           const when = rec ? formatDate(rec.timestamp) : '—';
            const coverage = rec?.data?.coverage_total ? rec.data.coverage_total + '%' : '—';
+           const distributor = rec?.data?.submitted_by || '—';
+           
            schoolRows += `
-             <tr style="cursor:pointer;${done ? 'background:#fff5f5;' : ''}" onclick="openSchoolDetail('${s.key}')">
-               <td>
-                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;
-                   background:${done ? '#dc3545' : '#adb5bd'};margin-right:8px;flex-shrink:0;"></span>
+             <tr style="cursor:pointer; ${done ? 'background:#f0fff0;' : ''}" onclick="openSchoolDetail('${s.key}')">
+               <td style="padding:12px 8px; text-align:left;">
+                 <span style="display:inline-block; width:10px; height:10px; border-radius:50%;
+                   background:${done ? '#28a745' : '#ffc107'}; margin-right:10px;"></span>
                  <strong>${s.school_name}</strong>
                </td>
-               <td>${s.community}</td>
-               <td>${s.district}</td>
-               <td style="text-align:center;">
+               <td style="padding:12px 8px; text-align:center;">${s.community}</td>
+               <td style="padding:12px 8px; text-align:center;">${s.district}</td>
+               <td style="padding:12px 8px; text-align:center;">
                  ${done
-                   ? `<span style="background:#dc3545;color:#fff;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;">SUBMITTED</span>`
-                   : `<span style="background:#ffc107;color:#000;border-radius:4px;padding:2px 8px;font-size:10px;font-weight:700;">PENDING</span>`}
+                   ? `<span style="background:#28a745; color:#fff; border-radius:4px; padding:4px 12px; font-size:11px; font-weight:600; letter-spacing:0.5px;">SUBMITTED</span>`
+                   : `<span style="background:#ffc107; color:#000; border-radius:4px; padding:4px 12px; font-size:11px; font-weight:600; letter-spacing:0.5px;">PENDING</span>`}
                </td>
-               <td style="font-size:11px;color:#666;">${when}</td>
-               <td style="text-align:center;font-weight:700;color:${done ? '#28a745' : '#aaa'}">${coverage}</td>
-               <td style="text-align:center;">
+               <td style="padding:12px 8px; text-align:center; font-size:11px; color:#666;">${when}</td>
+               <td style="padding:12px 8px; text-align:center; font-size:11px;">${distributor}</td>
+               <td style="padding:12px 8px; text-align:center; font-weight:700; color:${done ? '#28a745' : '#aaa'}">${coverage}</td>
+               <td style="padding:12px 8px; text-align:center;">
                  ${done
-                   ? `<button onclick="event.stopPropagation();openSchoolDetail('${s.key}')"
-                        style="background:#004080;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:10px;cursor:pointer;font-family:inherit;">VIEW</button>`
-                   : `<button onclick="event.stopPropagation();loadSchoolIntoForm('${s.key}')"
-                        style="background:#28a745;color:#fff;border:none;border-radius:4px;padding:4px 10px;font-size:10px;cursor:pointer;font-family:inherit;">START</button>`}
+                   ? `<button onclick="event.stopPropagation(); openSchoolDetail('${s.key}')"
+                        style="background:#004080; color:#fff; border:none; border-radius:4px; padding:6px 16px; font-size:11px; font-weight:600; cursor:pointer; font-family:'Oswald',sans-serif; letter-spacing:0.5px;">VIEW</button>`
+                   : `<button onclick="event.stopPropagation(); loadSchoolIntoForm('${s.key}')"
+                        style="background:#28a745; color:#fff; border:none; border-radius:4px; padding:6px 16px; font-size:11px; font-weight:600; cursor:pointer; font-family:'Oswald',sans-serif; letter-spacing:0.5px;">START</button>`}
                </td>
              </tr>`;
        });
 
     body.innerHTML = `
-      <!-- STAT CARDS -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
-        <div style="background:#e8f1fa;border:2px solid #004080;border-radius:10px;padding:16px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#004080;">${total}</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Target Schools</div>
+      <!-- STAT CARDS - Centered -->
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:15px; margin-bottom:25px;">
+        <div style="background:#e8f1fa; border:2px solid #004080; border-radius:10px; padding:20px 10px; text-align:center;">
+          <div style="font-size:36px; font-weight:700; color:#004080; line-height:1.2;">${total}</div>
+          <div style="font-size:12px; color:#555; text-transform:uppercase; letter-spacing:.5px; margin-top:5px;">Target Schools</div>
         </div>
-        <div style="background:#e8f5e9;border:2px solid #28a745;border-radius:10px;padding:16px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#28a745;">${submitted.length}</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Submitted</div>
+        <div style="background:#e8f5e9; border:2px solid #28a745; border-radius:10px; padding:20px 10px; text-align:center;">
+          <div style="font-size:36px; font-weight:700; color:#28a745; line-height:1.2;">${submitted.length}</div>
+          <div style="font-size:12px; color:#555; text-transform:uppercase; letter-spacing:.5px; margin-top:5px;">Submitted</div>
         </div>
-        <div style="background:#fff5f5;border:2px solid #dc3545;border-radius:10px;padding:16px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#dc3545;">${pending.length}</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Remaining</div>
+        <div style="background:#fff5f5; border:2px solid #dc3545; border-radius:10px; padding:20px 10px; text-align:center;">
+          <div style="font-size:36px; font-weight:700; color:#dc3545; line-height:1.2;">${pending.length}</div>
+          <div style="font-size:12px; color:#555; text-transform:uppercase; letter-spacing:.5px; margin-top:5px;">Remaining</div>
         </div>
-        <div style="background:#fff8e1;border:2px solid #ffc107;border-radius:10px;padding:16px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#e6a800;">${pct}%</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Completion</div>
+        <div style="background:#fff8e1; border:2px solid #ffc107; border-radius:10px; padding:20px 10px; text-align:center;">
+          <div style="font-size:36px; font-weight:700; color:#e6a800; line-height:1.2;">${pct}%</div>
+          <div style="font-size:12px; color:#555; text-transform:uppercase; letter-spacing:.5px; margin-top:5px;">Completion</div>
         </div>
       </div>
 
-      <!-- PROGRESS BAR -->
-      <div style="background:#e9ecef;border-radius:8px;height:16px;overflow:hidden;margin-bottom:20px;">
-        <div style="background:${pct===100?'#28a745':'#004080'};height:100%;width:${pct}%;transition:width .4s;border-radius:8px;"></div>
+      <!-- PROGRESS BAR - Centered -->
+      <div style="background:#e9ecef; border-radius:8px; height:20px; overflow:hidden; margin:0 0 25px 0;">
+        <div style="background:${pct===100?'#28a745':'#004080'}; height:100%; width:${pct}%; transition:width .4s; border-radius:8px;"></div>
       </div>
 
-      <!-- BY DISTRICT -->
-      <div style="margin-bottom:20px;">
-        <div style="background:#004080;color:#fff;padding:10px 15px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">
-          Progress by District
+      <!-- BY DISTRIBUTOR - Replaced district with distributor -->
+      <div style="margin-bottom:25px;">
+        <div style="background:#004080; color:#fff; padding:12px 20px; border-radius:8px 8px 0 0; font-size:14px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; text-align:center;">
+          Progress by Distributor
         </div>
-        <div style="overflow-x:auto;border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <div style="overflow-x:auto; border:2px solid #dee2e6; border-top:none; border-radius:0 0 8px 8px;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px;">
             <thead>
               <tr style="background:#f8f9fa;">
-                <th style="padding:8px 12px;text-align:left;border-bottom:1px solid #dee2e6;">District</th>
-                <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Target</th>
-                <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Done</th>
-                <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Left</th>
-                <th style="padding:8px 12px;text-align:left;border-bottom:1px solid #dee2e6;">Progress</th>
+                <th style="padding:12px 15px; text-align:left; border-bottom:1px solid #dee2e6;">Distributor</th>
+                <th style="padding:12px; text-align:center; border-bottom:1px solid #dee2e6;">Target</th>
+                <th style="padding:12px; text-align:center; border-bottom:1px solid #dee2e6;">Done</th>
+                <th style="padding:12px; text-align:center; border-bottom:1px solid #dee2e6;">Left</th>
+                <th style="padding:12px 15px; text-align:center; border-bottom:1px solid #dee2e6;">Progress</th>
               </tr>
             </thead>
-            <tbody>${districtRows}</tbody>
+            <tbody>${distributorRows}</tbody>
           </table>
         </div>
       </div>
 
-      <!-- ALL SCHOOLS LIST -->
+      <!-- ALL SCHOOLS LIST - More space, centered text -->
       <div>
-        <div style="background:#004080;color:#fff;padding:10px 15px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;">
+        <div style="background:#004080; color:#fff; padding:12px 20px; border-radius:8px 8px 0 0; font-size:14px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; display:flex; justify-content:space-between; align-items:center;">
           <span>All Assigned Schools</span>
-          <span style="font-size:11px;font-weight:400;opacity:.8;">Click any row to view / start</span>
+          <span style="font-size:12px; font-weight:400; opacity:.8;">Click any row to view / start</span>
         </div>
-        <div style="overflow-x:auto;border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <div style="overflow-x:auto; border:2px solid #dee2e6; border-top:none; border-radius:0 0 8px 8px;">
+          <table style="width:100%; border-collapse:collapse; font-size:13px;">
             <thead>
               <tr style="background:#f8f9fa;">
-                <th style="padding:8px 12px;text-align:left;border-bottom:1px solid #dee2e6;">School</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #dee2e6;">Community</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #dee2e6;">District</th>
-                <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Status</th>
-                <th style="padding:8px;text-align:left;border-bottom:1px solid #dee2e6;">Submitted At</th>
-                <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Coverage</th>
-                <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Action</th>
+                <th style="padding:12px 15px; text-align:left; border-bottom:2px solid #dee2e6;">School</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">Community</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">District</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">Status</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">Submitted</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">By</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">Coverage</th>
+                <th style="padding:12px; text-align:center; border-bottom:2px solid #dee2e6;">Action</th>
               </tr>
             </thead>
             <tbody>${schoolRows}</tbody>
@@ -719,12 +764,11 @@ function closeSummaryModal() {
 }
 
 // ============================================
-// SCHOOL DETAIL MODAL
+// SCHOOL DETAIL MODAL - Fixed date display
 // ============================================
 function openSchoolDetail(key) {
     const rec = getSubmittedRecord(key);
     if (!rec) {
-        // Not yet submitted — offer to start
         const school = getAllAssignedSchools().find(s => s.key === key);
         if (school) {
             if (confirm('This school has not been submitted yet. Load it into the form now?'))
@@ -751,12 +795,12 @@ function openSchoolDetail(key) {
         const itn      = boysITN + girlsITN;
         const cov      = total > 0 ? Math.round((itn / total) * 100) : 0;
         classRows += `<tr>
-          <td style="font-weight:600;">Class ${c}</td>
-          <td style="text-align:center;">${boys}</td><td style="text-align:center;">${boysITN}</td>
-          <td style="text-align:center;">${girls}</td><td style="text-align:center;">${girlsITN}</td>
-          <td style="text-align:center;font-weight:700;">${total}</td>
-          <td style="text-align:center;font-weight:700;">${itn}</td>
-          <td style="text-align:center;font-weight:700;color:${cov>=80?'#28a745':cov>=50?'#e6a800':'#dc3545'};">${cov}%</td>
+          <td style="font-weight:600; text-align:left; padding:8px 12px;">Class ${c}</td>
+          <td style="text-align:center; padding:8px;">${boys}</td><td style="text-align:center; padding:8px;">${boysITN}</td>
+          <td style="text-align:center; padding:8px;">${girls}</td><td style="text-align:center; padding:8px;">${girlsITN}</td>
+          <td style="text-align:center; padding:8px; font-weight:700;">${total}</td>
+          <td style="text-align:center; padding:8px; font-weight:700;">${itn}</td>
+          <td style="text-align:center; padding:8px; font-weight:700; color:${cov>=80?'#28a745':cov>=50?'#e6a800':'#dc3545'};">${cov}%</td>
         </tr>`;
     }
 
@@ -777,8 +821,8 @@ function openSchoolDetail(key) {
     ].filter(Boolean).join(', ') || '—';
 
     body.innerHTML = `
-      <!-- Location + meta -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px;">
+      <!-- Location + meta - Centered -->
+      <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:12px; margin-bottom:25px;">
         ${infoCard('District',      d.district      || '—')}
         ${infoCard('Chiefdom',      d.chiefdom      || '—')}
         ${infoCard('Section',       d.section_loc   || '—')}
@@ -789,22 +833,22 @@ function openSchoolDetail(key) {
         ${infoCard('HT Phone',      d.head_teacher_phone || '—')}
         ${infoCard('Distribution Date', d.distribution_date || '—')}
         ${infoCard('Survey Date',   d.survey_date   || '—')}
-        ${infoCard('Submitted At',  rec.timestamp ? new Date(rec.timestamp).toLocaleString() : '—')}
+        ${infoCard('Submitted At',  formatDate(rec.timestamp))}
         ${infoCard('Submitted By',  d.submitted_by  || '—')}
         ${infoCard('ITN Type(s)',   itnTypes)}
         ${infoCard('ITNs Received', d.itns_received || '—')}
       </div>
 
-      <!-- Coverage summary cards -->
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
+      <!-- Coverage summary cards - Centered -->
+      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:25px;">
         ${statCard('Total Pupils',    totPupils,  '#004080')}
         ${statCard('ITNs Distributed', totITN,   '#28a745')}
         ${statCard('ITNs Remaining',  remaining, remaining < 0 ? '#dc3545' : '#fd7e14')}
         ${statCard('Coverage',        coverage + '%', coverage >= 80 ? '#28a745' : coverage >= 50 ? '#e6a800' : '#dc3545')}
       </div>
 
-      <!-- Gender breakdown -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;">
+      <!-- Gender breakdown - Centered -->
+      <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:25px;">
         ${statCard('Boys Enrolled',      totBoys,     '#004080')}
         ${statCard('Boys ITN Coverage',  covBoys+'%', '#004080')}
         ${statCard('Boys Received ITN',  totBoysITN,  '#004080')}
@@ -813,46 +857,46 @@ function openSchoolDetail(key) {
         ${statCard('Girls Received ITN', totGirlsITN, '#e91e8c')}
       </div>
 
-      <!-- Class breakdown table -->
-      <div style="background:#004080;color:#fff;padding:10px 15px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">
+      <!-- Class breakdown table - Centered -->
+      <div style="background:#004080; color:#fff; padding:12px 20px; border-radius:8px 8px 0 0; font-size:14px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; text-align:center;">
         Class-by-Class Breakdown
       </div>
-      <div style="overflow-x:auto;border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;margin-bottom:20px;">
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+      <div style="overflow-x:auto; border:2px solid #dee2e6; border-top:none; border-radius:0 0 8px 8px; margin-bottom:25px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead>
             <tr style="background:#f8f9fa;">
-              <th style="padding:8px 12px;text-align:left;border-bottom:1px solid #dee2e6;">Class</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Boys</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Boys ITN</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Girls</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Girls ITN</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Total</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">ITN</th>
-              <th style="padding:8px;text-align:center;border-bottom:1px solid #dee2e6;">Coverage</th>
+              <th style="padding:10px 12px; text-align:left; border-bottom:1px solid #dee2e6;">Class</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">Boys</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">Boys ITN</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">Girls</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">Girls ITN</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">Total</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">ITN</th>
+              <th style="padding:10px; text-align:center; border-bottom:1px solid #dee2e6;">Coverage</th>
             </tr>
           </thead>
           <tbody>
             ${classRows}
-            <tr style="background:#e8f1fa;font-weight:700;">
-              <td style="padding:8px 12px;">TOTAL</td>
-              <td style="text-align:center;">${totBoys}</td><td style="text-align:center;">${totBoysITN}</td>
-              <td style="text-align:center;">${totGirls}</td><td style="text-align:center;">${totGirlsITN}</td>
-              <td style="text-align:center;">${totPupils}</td><td style="text-align:center;">${totITN}</td>
-              <td style="text-align:center;color:${coverage>=80?'#28a745':coverage>=50?'#e6a800':'#dc3545'};font-size:15px;">${coverage}%</td>
+            <tr style="background:#e8f1fa; font-weight:700;">
+              <td style="padding:10px 12px;">TOTAL</td>
+              <td style="text-align:center; padding:10px;">${totBoys}</td><td style="text-align:center; padding:10px;">${totBoysITN}</td>
+              <td style="text-align:center; padding:10px;">${totGirls}</td><td style="text-align:center; padding:10px;">${totGirlsITN}</td>
+              <td style="text-align:center; padding:10px;">${totPupils}</td><td style="text-align:center; padding:10px;">${totITN}</td>
+              <td style="text-align:center; padding:10px; color:${coverage>=80?'#28a745':coverage>=50?'#e6a800':'#dc3545'}; font-size:15px;">${coverage}%</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <!-- Team members -->
+      <!-- Team members - Centered -->
       ${buildTeamSection(d)}
 
-      <!-- GPS - Maps link removed as requested -->
+      <!-- GPS - Centered -->
       ${d.gps_lat ? `
-      <div style="background:#e8f1fa;border:2px solid #004080;border-radius:8px;padding:12px 16px;font-size:12px;">
-        <strong style="color:#004080;">GPS COORDINATES:</strong>
-        ${d.gps_lat}, ${d.gps_lng}
-        ${d.gps_acc ? '<span style="color:#666;margin-left:8px;">(±' + d.gps_acc + 'm)</span>' : ''}
+      <div style="background:#e8f1fa; border:2px solid #004080; border-radius:8px; padding:15px 20px; font-size:13px; text-align:center;">
+        <strong style="color:#004080; display:block; margin-bottom:5px;">GPS COORDINATES</strong>
+        <div style="font-family:monospace; font-size:14px;">${d.gps_lat}, ${d.gps_lng}</div>
+        ${d.gps_acc ? '<div style="color:#666; margin-top:5px; font-size:11px;">Accuracy: ±' + d.gps_acc + 'm</div>' : ''}
       </div>` : ''}`;
 
     closeSummaryModal();
@@ -860,30 +904,30 @@ function openSchoolDetail(key) {
 }
 
 function infoCard(label, value) {
-    return `<div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:7px;padding:10px 14px;">
-      <div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px;">${label}</div>
-      <div style="font-size:13px;font-weight:600;color:#333;">${value}</div>
+    return `<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:7px; padding:12px 15px; text-align:center;">
+      <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-bottom:4px;">${label}</div>
+      <div style="font-size:14px; font-weight:600; color:#333;">${value}</div>
     </div>`;
 }
 
 function statCard(label, value, color) {
-    return `<div style="background:#fff;border:2px solid ${color}20;border-radius:10px;padding:14px;text-align:center;">
-      <div style="font-size:26px;font-weight:700;color:${color};">${value}</div>
-      <div style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">${label}</div>
+    return `<div style="background:#fff; border:2px solid ${color}20; border-radius:10px; padding:15px 10px; text-align:center;">
+      <div style="font-size:28px; font-weight:700; color:${color}; line-height:1.2;">${value}</div>
+      <div style="font-size:11px; color:#666; text-transform:uppercase; letter-spacing:.5px; margin-top:5px;">${label}</div>
     </div>`;
 }
 
 function buildTeamSection(d) {
-    let html = '<div style="margin-bottom:16px;"><div style="background:#004080;color:#fff;padding:10px 15px;border-radius:8px 8px 0 0;font-size:13px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;">Team Members</div>';
-    html += '<div style="border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;padding:14px;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">';
+    let html = '<div style="margin-bottom:20px;"><div style="background:#004080; color:#fff; padding:12px 20px; border-radius:8px 8px 0 0; font-size:14px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; text-align:center;">Team Members</div>';
+    html += '<div style="border:2px solid #dee2e6; border-top:none; border-radius:0 0 8px 8px; padding:20px; display:grid; grid-template-columns:repeat(3,1fr); gap:15px;">';
     for (let i = 1; i <= 3; i++) {
         const name  = d['team' + i + '_name']  || '';
         const phone = d['team' + i + '_phone'] || '';
         if (name) {
-            html += `<div style="background:#f8f9fa;border-radius:7px;padding:10px;">
-              <div style="font-size:10px;color:#004080;font-weight:700;text-transform:uppercase;margin-bottom:4px;">Member ${i}</div>
-              <div style="font-size:13px;font-weight:600;">${name}</div>
-              ${phone ? `<div style="font-size:11px;color:#666;margin-top:2px;">${phone}</div>` : ''}
+            html += `<div style="background:#f8f9fa; border-radius:8px; padding:15px; text-align:center;">
+              <div style="font-size:11px; color:#004080; font-weight:700; text-transform:uppercase; margin-bottom:6px;">Member ${i}</div>
+              <div style="font-size:14px; font-weight:600;">${name}</div>
+              ${phone ? `<div style="font-size:12px; color:#666; margin-top:4px;">${phone}</div>` : ''}
             </div>`;
         }
     }
@@ -904,14 +948,12 @@ function loadSchoolIntoForm(key) {
 
     closeSummaryModal();
 
-    // Scroll to top and navigate to section 2
     document.querySelectorAll('.form-section').forEach(s => s.classList.remove('active'));
     state.currentSection = 2;
     document.querySelector('.form-section[data-section="2"]').classList.add('active');
     updateProgress();
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    // Cascade the location
     const distEl = document.getElementById('district');
     if (distEl) { distEl.value = school.district; distEl.dispatchEvent(new Event('change')); }
     setTimeout(() => {
@@ -939,7 +981,7 @@ function loadSchoolIntoForm(key) {
 }
 
 // ============================================
-// VALIDATION
+// VALIDATION (unchanged)
 // ============================================
 function setupValidation() {
     document.querySelectorAll('.itn-field').forEach(input => {
@@ -1230,7 +1272,6 @@ function validateCurrentSection() {
     const section = document.querySelector('.form-section[data-section="'+state.currentSection+'"]');
     if (!section || state.currentSection === 1) return true;
 
-    // Block if school already submitted
     if (state.currentSection === 2) {
         const key = currentSchoolKey();
         if (key && isSchoolSubmitted(key)) {
@@ -1315,7 +1356,7 @@ function openDraftsModal() {
     const visible = state.isAdmin ? state.drafts : state.drafts.filter(d => !d.saved_by || d.saved_by === state.currentUser);
     if (visible.length === 0) { body.innerHTML = '<div class="no-drafts">No saved drafts</div>'; }
     else { body.innerHTML = visible.map(d =>
-        '<div class="draft-item"><div class="draft-info"><div class="draft-name">'+d.draftName+'</div><div class="draft-date">'+new Date(d.savedAt).toLocaleString()+(d.saved_by?' &mdash; '+d.saved_by:'')+'</div></div>'+
+        '<div class="draft-item"><div class="draft-info"><div class="draft-name">'+d.draftName+'</div><div class="draft-date">'+formatDate(d.savedAt)+(d.saved_by?' &mdash; '+d.saved_by:'')+'</div></div>'+
         '<div class="draft-actions"><button class="draft-btn load" onclick="loadDraft(\''+d.draftId+'\')">Load</button>'+
         '<button class="draft-btn delete" onclick="deleteDraft(\''+d.draftId+'\')">Delete</button></div></div>').join(''); }
     modal.classList.add('show');
@@ -1446,7 +1487,7 @@ function markSchoolSubmitted(data) {
 
 function saveOffline(data) {
     state.pendingSubmissions.push(data);
-    markSchoolSubmitted(data);   // Mark as submitted even offline so it can't be double-entered
+    markSchoolSubmitted(data);
     saveToStorage(); updateCounts(); updateSummaryBadge();
     showNotification('Saved offline. Will sync when online.', 'info');
     resetForm();
@@ -1592,7 +1633,7 @@ async function syncPending() {
 }
 
 // ============================================
-// VIEW SUMMARY FUNCTION (called from Summary button)
+// VIEW SUMMARY FUNCTION
 // ============================================
 function viewSummary() {
     openSummaryModal();
