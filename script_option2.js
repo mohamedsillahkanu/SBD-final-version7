@@ -283,11 +283,13 @@ function startApp(displayName, isAdmin) {
     setupPhoneValidation();
     setupNameValidation();
     setupCalculations();
+    setupAutoSave();
     initAllSignaturePads();
     captureGPS();
     setDefaultDate();
     updateProgress();
     updateSummaryBadge();
+    restoreDraftIfExists();
 
     showNotification('Welcome to ICF Collect!', 'success');
 }
@@ -1342,88 +1344,116 @@ window.clearTeamSignature = function(n) {
 function clearSignature() { for(let i=1;i<=3;i++) clearTeamSignature(i); }
 
 // ============================================
-// DRAFTS
 // ============================================
-window.showDraftNameModal = function() {
-    const modal=document.getElementById('draftNameModal'), input=document.getElementById('draftNameInput');
-    if(!modal||!input) return;
-    input.value=generateDraftName(); input.readOnly=true; modal.classList.add('show');
-};
+// SILENT AUTO-SAVE & AUTO-RESTORE
+// Saves every field change to localStorage automatically.
+// Restores silently on next load — no banners, no buttons.
+// ============================================
+const DRAFT_KEY = 'itn_single_draft';
 
-function generateDraftName() {
-    const parts=[];
-    ['district','chiefdom','section_loc','community','school_name'].forEach(id=>{
-        const el=document.getElementById(id); if(el&&el.value) parts.push(el.value.replace(' District','').trim());
-    });
-    const base=parts.length===0?'Draft - '+new Date().toLocaleDateString():parts.join('-');
-    return state.currentUser?state.currentUser+' | '+base:base;
+function collectDraftData() {
+    const formData = new FormData(document.getElementById('dataForm'));
+    const data = {
+        _savedAt:        new Date().toISOString(),
+        _currentSection: state.currentSection,
+        itn_type_pbo:    document.getElementById('itn_type_pbo')?.checked || false,
+        itn_type_ig2:    document.getElementById('itn_type_ig2')?.checked || false,
+    };
+    for (const [k, v] of formData.entries()) data[k] = v;
+    return data;
 }
 
-window.cancelDraftName   = function() { document.getElementById('draftNameModal')?.classList.remove('show'); };
-window.confirmSaveDraft  = function() {
-    const input=document.getElementById('draftNameInput');
-    const n=(input&&input.value.trim())||'Unnamed Draft';
-    cancelDraftName(); saveDraft(n);
-};
-
-function saveDraft(name) {
-    const formData=new FormData(document.getElementById('dataForm'));
-    const data={draftId:state.currentDraftId||'draft_'+Date.now(),draftName:name,savedAt:new Date().toISOString(),currentSection:state.currentSection,saved_by:state.currentUser||''};
-    for(const [k,v] of formData.entries()) data[k]=v;
-    data.itn_type_pbo=document.getElementById('itn_type_pbo')?.checked||false;
-    data.itn_type_ig2=document.getElementById('itn_type_ig2')?.checked||false;
-    const idx=state.drafts.findIndex(d=>d.draftId===data.draftId);
-    if(idx>=0) state.drafts[idx]=data; else state.drafts.push(data);
-    state.currentDraftId=data.draftId;
-    saveToStorage(); updateCounts();
-    showNotification('Draft "'+name+'" saved!','success');
+function autoSaveDraft() {
+    try {
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(collectDraftData()));
+    } catch(e) {}
 }
 
-window.openDraftsModal = function() {
-    const modal=document.getElementById('draftsModal'), body=document.getElementById('draftsModalBody');
-    if(!modal||!body) return;
-    if(state.drafts.length===0) { body.innerHTML='<div class="no-drafts">No saved drafts</div>'; }
-    else { body.innerHTML=state.drafts.map(d=>'<div class="draft-item"><div class="draft-info"><div class="draft-name">'+d.draftName+'</div><div class="draft-date">'+formatDate(d.savedAt)+(d.saved_by?' &mdash; '+d.saved_by:'')+'</div></div><div class="draft-actions"><button class="draft-btn load" onclick="loadDraft(\''+d.draftId+'\')">Load</button><button class="draft-btn delete" onclick="deleteDraft(\''+d.draftId+'\')">Delete</button></div></div>').join(''); }
-    modal.classList.add('show');
-};
+function clearDraft() {
+    try { localStorage.removeItem(DRAFT_KEY); } catch(e) {}
+    state.currentDraftId = null;
+    state.drafts = [];
+    saveToStorage();
+    updateCounts();
+}
 
-window.closeDraftsModal = function() { document.getElementById('draftsModal')?.classList.remove('show'); };
+// Called from startApp — silently restores previous session if exists
+function restoreDraftIfExists() {
+    try {
+        const raw = localStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const draft = JSON.parse(raw);
+        if (!draft || !draft._savedAt) return;
+        _applyDraft(draft);
+    } catch(e) { console.warn('[AutoSave] Restore failed:', e.message); }
+}
 
-window.loadDraft = function(id) {
-    const draft=state.drafts.find(d=>d.draftId===id); if(!draft) return;
-    state.currentDraftId=id;
-    const chain=[['district',draft.district],['chiefdom',draft.chiefdom],['section_loc',draft.section_loc],['facility',draft.facility],['community',draft.community],['school_name',draft.school_name]];
-    let delay=0;
-    chain.forEach(([elId, val])=>{
-        if(!val) return;
-        setTimeout(()=>{ const el=document.getElementById(elId); if(el){el.value=val;el.dispatchEvent(new Event('change'));} }, delay);
-        delay+=100;
+function _applyDraft(draft) {
+    const geoChain = [
+        ['district',    draft.district],
+        ['chiefdom',    draft.chiefdom],
+        ['section_loc', draft.section_loc],
+        ['facility',    draft.facility],
+        ['community',   draft.community],
+        ['school_name', draft.school_name]
+    ];
+    let delay = 0;
+    geoChain.forEach(([elId, val]) => {
+        if (!val) return;
+        setTimeout(() => {
+            const el = document.getElementById(elId);
+            if (el) { el.value = val; el.dispatchEvent(new Event('change')); }
+        }, delay);
+        delay += 120;
     });
-    setTimeout(()=>{
-        Object.keys(draft).forEach(k=>{
-            if(['draftId','draftName','savedAt','currentSection','saved_by','district','chiefdom','section_loc','facility','community','school_name','itn_type_pbo','itn_type_ig2'].includes(k)) return;
-            const el=document.getElementById(k); if(el) el.value=draft[k];
+
+    const skip = new Set([
+        '_savedAt','_currentSection','itn_type_pbo','itn_type_ig2',
+        'district','chiefdom','section_loc','facility','community','school_name'
+    ]);
+    setTimeout(() => {
+        Object.entries(draft).forEach(([k, v]) => {
+            if (skip.has(k)) return;
+            const el = document.getElementById(k);
+            if (el && el.type !== 'hidden') el.value = v;
         });
-        const pbo=document.getElementById('itn_type_pbo'), ig2=document.getElementById('itn_type_ig2');
-        if(pbo&&draft.itn_type_pbo!==undefined) pbo.checked=draft.itn_type_pbo;
-        if(ig2&&draft.itn_type_ig2!==undefined) ig2.checked=draft.itn_type_ig2;
+        const pbo = document.getElementById('itn_type_pbo');
+        const ig2 = document.getElementById('itn_type_ig2');
+        if (pbo) pbo.checked = !!draft.itn_type_pbo;
+        if (ig2) ig2.checked = !!draft.itn_type_ig2;
         toggleITNTypeQuantity();
-        if(draft.currentSection){
-            document.querySelectorAll('.form-section').forEach(s=>s.classList.remove('active'));
-            state.currentSection=draft.currentSection;
-            document.querySelector('.form-section[data-section="'+draft.currentSection+'"]')?.classList.add('active');
-        }
-        updateProgress(); calculateAll();
-    }, delay);
-    closeDraftsModal();
-    showNotification('Draft "'+draft.draftName+'" loaded!','success');
-};
 
-window.deleteDraft = function(id) {
-    if(!confirm('Delete this draft?')) return;
-    state.drafts=state.drafts.filter(d=>d.draftId!==id);
-    saveToStorage(); updateCounts(); openDraftsModal();
-};
+        const sec = parseInt(draft._currentSection) || 1;
+        document.querySelectorAll('.form-section').forEach(s => s.classList.remove('active'));
+        state.currentSection = sec;
+        document.querySelector('.form-section[data-section="'+sec+'"]')?.classList.add('active');
+        updateProgress();
+        calculateAll();
+    }, delay + 100);
+}
+
+function setupAutoSave() {
+    const form = document.getElementById('dataForm');
+    if (!form) return;
+    let _t = null;
+    const trigger = () => { clearTimeout(_t); _t = setTimeout(autoSaveDraft, 600); };
+    form.addEventListener('input',  trigger);
+    form.addEventListener('change', trigger);
+}
+
+// ── No-op stubs (keep compat with any old HTML references) ───
+window.saveDraftNow       = function() {};
+window.resumeDraft        = function() {};
+window.discardDraft       = function() {};
+window.showDraftNameModal = function() {};
+window.cancelDraftName    = function() {};
+window.confirmSaveDraft   = function() {};
+window.openDraftsModal    = function() {};
+window.closeDraftsModal   = function() {};
+window.loadDraft          = function() {};
+window.deleteDraft        = function() {};
+function generateDraftName() { return 'Draft'; }
+function updateDraftIndicator() {}
 
 // ============================================
 // FINALIZE & SUBMIT
@@ -1527,6 +1557,7 @@ async function handleSubmit(e) {
             await fetch(CONFIG.SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
             markSchoolSubmitted(data);
             if(state.currentDraftId) state.drafts=state.drafts.filter(d=>d.draftId!==state.currentDraftId);
+            clearDraft();
             saveToStorage(); updateCounts(); updateSummaryBadge();
             showNotification('✅ Submitted successfully!','success'); resetForm();
         } catch(err){ saveOffline(data); }
@@ -1543,6 +1574,7 @@ function markSchoolSubmitted(data) {
 function saveOffline(data) {
     state.pendingSubmissions.push(data);
     markSchoolSubmitted(data);
+    clearDraft();
     saveToStorage(); updateCounts(); updateSummaryBadge();
     showNotification('Saved offline. Will sync when online.','info'); resetForm();
 }
