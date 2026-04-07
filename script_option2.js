@@ -1,2127 +1,1078 @@
-// ============================================
-// PWA INSTALL BANNER
-// ============================================
+// ============================================================
+//  ICF-SL  ai_agent.js
+//  • Analysis dashboard — fetches from ICF-SL Server via GAS
+//  • AI Agent modal (GAS-backed Claude chat)
+// ============================================================
+(function () {
+    'use strict';
 
-window.pwaDoInstall = async function() {
-    console.log('[PWA] Install clicked, prompt:', !!deferredPrompt);
-    if (deferredPrompt) {
-        const btn = document.getElementById('installBtn');
-        if (btn) { btn.textContent = 'Installing…'; btn.disabled = true; }
-        try {
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            deferredPrompt = null;
-            if (outcome === 'accepted') {
-                if (btn) { btn.textContent = '\u2713 Installed!'; btn.style.background = '#28a745'; }
-                showNotification('Installed! Open from your home screen.', 'success');
-                setTimeout(() => {
-                    const b = document.getElementById('installBanner');
-                    if (b) b.style.display = 'none';
-                }, 3000);
-            } else {
-                if (btn) { btn.textContent = 'INSTALL'; btn.disabled = false; }
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbymRy-M5v0fVLWUjw4IXYhd1oIR2ZvnP_Dzr_iGR-Th0cMIpmE2ntGeujWYH7-C6NHIzA/exec';
+    const SHEET_ID = '1cXlYiTMzcRP1BCj9mt1JXoK_pjgWbRtDEEQUPMg2HPs';
+
+    // ════════════════════════════════════════════════════════
+    //  AUTO-START  — no login required
+    //  script_option2.js calls showLoginScreen() after the CSV
+    //  loads. We override it to skip directly to startApp().
+    // ════════════════════════════════════════════════════════
+    (function patchAutoStart() {
+        // Override showLoginScreen → auto-start as admin
+        window.showLoginScreen = function () {
+            if (window.state) {
+                window.state.currentUser = 'admin';
+                window.state.isAdmin     = true;
+                window.LOCATION_DATA     = window.ALL_LOCATION_DATA || {};
             }
-        } catch(e) {
-            console.error('[PWA]', e);
-            const btn2 = document.getElementById('installBtn');
-            if (btn2) { btn2.textContent = 'INSTALL'; btn2.disabled = false; }
-        }
-        return;
-    }
-    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isAndroid = /android/i.test(navigator.userAgent);
-    if (isIOS) showNotification('Tap Share (\u2191) then "Add to Home Screen"', 'info');
-    else if (isAndroid) showNotification('Tap browser menu (⋮) \u2192 "Add to Home Screen"', 'info');
-    else showNotification('Click the install icon in your browser address bar', 'info');
-};
-window.pwaCloseBanner = function() {
-    const b = document.getElementById('pwaInstallBanner');
-    if (b) b.style.bottom = '-120px';
-};
+            window.startApp && window.startApp('ICF-SL', true);
+        };
 
-function _pwaBannerShow() {
-    const b = document.getElementById('pwaInstallBanner');
-    if (b) setTimeout(() => { b.style.bottom = '16px'; }, 80);
-}
-function _pwaSuccess() {
-    showNotification('App installed! Open from home screen.', 'success');
-    const banner = document.getElementById('installBanner');
-    if (banner) banner.style.display = 'none';
-    const pb = document.getElementById('pwaInstallBanner');
-    if (pb) pb.style.bottom = '-120px';
-}
-function _pwaInjectBanner() {
-    if (document.getElementById('pwaInstallBanner')) return;
-    const b = document.createElement('div');
-    b.id = 'pwaInstallBanner';
-    b.setAttribute('style', 'position:fixed;bottom:-120px;left:50%;transform:translateX(-50%);width:calc(100% - 24px);max-width:520px;background:linear-gradient(135deg,#002952,#004080);border-radius:14px;padding:13px 14px;box-shadow:0 -2px 30px rgba(0,0,0,.4);border:1.5px solid rgba(200,153,26,.45);z-index:2147483647;transition:bottom .4s ease;box-sizing:border-box;pointer-events:all;');
-    b.innerHTML =
-        '<div style="display:flex;align-items:center;gap:11px;pointer-events:all;">' +
-          '<img src="./icons/icon-192.png" width="40" height="40" style="border-radius:9px;flex-shrink:0;" onerror="this.style.display=\x27none\x27">' +
-          '<div style="flex:1;">' +
-            '<div style="font-family:Oswald,sans-serif;font-size:13px;font-weight:700;color:#fff;">SBD 2026 — ITN Survey</div>' +
-            '<div style="font-size:11px;color:rgba(255,255,255,.72);">Install for offline use &amp; quick access</div>' +
-          '</div>' +
-          '<button id="pwaInstallBtn" onclick="window.pwaDoInstall()" style="background:#c8991a;color:#fff;border:none;border-radius:8px;padding:10px 18px;font-family:Oswald,sans-serif;font-size:13px;font-weight:700;cursor:pointer;flex-shrink:0;pointer-events:all;touch-action:manipulation;">INSTALL</button>' +
-          '<button onclick="window.pwaCloseBanner()" style="background:rgba(255,255,255,.16);color:#fff;border:none;border-radius:6px;min-width:30px;height:30px;cursor:pointer;display:flex;align-items:center;justify-content:center;pointer-events:all;touch-action:manipulation;font-size:16px;">×</button>' +
-        '</div>';
-    document.body.appendChild(b);
-}
+        // Override hideLoginScreen → just show appMain (loginScreen stub stays hidden)
+        window.hideLoginScreen = function () {
+            const ls = document.getElementById('loginScreen');
+            if (ls) ls.style.display = 'none';
+            const am = document.getElementById('appMain');
+            if (am) { am.style.display = 'flex'; am.style.flexDirection = 'column'; }
+            if (typeof cacheImagesForOffline === 'function') cacheImagesForOffline();
+        };
 
-window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    deferredPrompt = e;
-    const btn = document.getElementById('installBtn');
-    if (btn) btn.style.background = '#28a745';
-    _pwaInjectBanner();
-    _pwaBannerShow();
-    console.log('[PWA] Install prompt ready');
-});
-window.addEventListener('appinstalled', () => {
-    deferredPrompt = null;
-    _pwaSuccess();
-    console.log('[PWA] Installed');
-});
+        // Override handleLogout → no-op (no login to return to)
+        window.handleLogout = function () { /* no login screen */ };
+    })();
 
-function setupInstallButton() {
-    const btn = document.getElementById('installBtn');
-    if (!btn) return;
-    if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
-        const b = document.getElementById('installBanner');
-        if (b) b.style.display = 'none';
-        return;
-    }
-    btn.style.display = 'inline-flex';
-    btn.setAttribute('onclick', 'window.pwaInstallClick()');
-}
-window.pwaInstallClick = window.pwaDoInstall;
+    // ════════════════════════════════════════════════════════
+    //  STYLES
+    // ════════════════════════════════════════════════════════
+    const style = document.createElement('style');
+    style.textContent = `
+    /* ── AI Agent modal ── */
+    #icfAiOverlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9100;display:none;justify-content:center;align-items:flex-end;padding:12px;}
+    #icfAiOverlay.show{display:flex;}
+    #icfAiModal{background:#fff;border-radius:16px 16px 12px 12px;border:3px solid #004080;width:100%;max-width:680px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 12px 48px rgba(0,0,0,.35);overflow:hidden;}
+    .icf-ai-head{background:linear-gradient(135deg,#002d5a,#004080);color:#fff;padding:13px 18px;display:flex;align-items:center;gap:12px;flex-shrink:0;}
+    .icf-ai-head-icon{width:34px;height:34px;background:rgba(255,255,255,.15);border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+    .icf-ai-head-icon svg{width:18px;height:18px;stroke:#fff;}
+    .icf-ai-head-info{flex:1;}
+    .icf-ai-head-title{font-family:'Oswald',sans-serif;font-size:15px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;line-height:1.2;}
+    .icf-ai-head-sub{font-size:10px;color:rgba(255,255,255,.7);}
+    .icf-ai-head-actions{display:flex;gap:6px;}
+    .icf-ai-hbtn{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:7px;padding:5px 10px;cursor:pointer;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;display:flex;align-items:center;gap:4px;transition:background .15s;}
+    .icf-ai-hbtn:hover{background:rgba(255,255,255,.22);}
+    .icf-ai-hbtn svg{width:12px;height:12px;stroke:#fff;}
+    .icf-ai-hbtn.gold{background:rgba(240,165,0,.25);border-color:rgba(240,165,0,.5);}
+    .icf-ai-stats{background:#e8f1fa;border-bottom:2px solid #c5d9f0;padding:7px 14px;display:flex;gap:14px;flex-shrink:0;overflow-x:auto;}
+    .icf-ai-stats::-webkit-scrollbar{display:none;}
+    .icf-ai-stat{text-align:center;white-space:nowrap;}
+    .icf-ai-stat-val{font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;color:#004080;line-height:1;}
+    .icf-ai-stat-lbl{font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:1px;}
+    .icf-ai-stat-div{width:1px;background:#bcd3eb;align-self:stretch;margin:2px 0;}
+    #icfAiMessages{flex:1;overflow-y:auto;padding:13px 15px;display:flex;flex-direction:column;gap:11px;background:#f8fafd;}
+    .icf-msg{display:flex;gap:8px;align-items:flex-start;}.icf-msg.user{flex-direction:row-reverse;}
+    .icf-msg-av{width:27px;height:27px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px;}
+    .icf-msg.ai .icf-msg-av{background:#004080;}.icf-msg.user .icf-msg-av{background:#f0a500;}
+    .icf-msg-av svg{width:13px;height:13px;stroke:#fff;}
+    .icf-bub{max-width:calc(100% - 42px);padding:9px 13px;border-radius:13px;font-size:13px;line-height:1.55;word-break:break-word;}
+    .icf-msg.ai .icf-bub{background:#fff;border:1.5px solid #c5d9f0;border-top-left-radius:4px;color:#222;}
+    .icf-msg.user .icf-bub{background:#004080;color:#fff;border-top-right-radius:4px;}
+    .icf-bub strong{font-weight:700;}.icf-bub code{background:rgba(0,64,128,.08);border-radius:3px;padding:1px 4px;font-family:monospace;font-size:12px;}
+    .icf-msg.user .icf-bub code{background:rgba(255,255,255,.18);}
+    .icf-typing{display:flex;align-items:center;gap:4px;padding:5px 0;}
+    .icf-typing span{width:7px;height:7px;background:#004080;border-radius:50%;animation:icf-bnc .9s ease-in-out infinite;}
+    .icf-typing span:nth-child(2){animation-delay:.15s;}.icf-typing span:nth-child(3){animation-delay:.30s;}
+    @keyframes icf-bnc{0%,100%{transform:translateY(0);opacity:.4;}50%{transform:translateY(-5px);opacity:1;}}
+    .icf-samples{padding:7px 14px 5px;flex-shrink:0;border-top:1px solid #e0eaf5;}
+    .icf-sq-lbl{font-size:9px;font-family:'Oswald',sans-serif;color:#888;letter-spacing:1px;text-transform:uppercase;margin-bottom:5px;}
+    .icf-sq-row{display:flex;gap:5px;flex-wrap:wrap;}
+    .icf-sq{background:#e8f1fa;border:1.5px solid #b3cde8;border-radius:20px;padding:4px 11px;font-size:11px;color:#004080;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .15s;font-family:'Oswald',sans-serif;}
+    .icf-sq:hover{background:#004080;color:#fff;border-color:#004080;}
+    .icf-inp-row{display:flex;gap:8px;padding:9px 13px 11px;border-top:2px solid #dce8f5;background:#fff;flex-shrink:0;align-items:flex-end;}
+    #icfAiInput{flex:1;border:2px solid #c5d9f0;border-radius:22px;padding:8px 14px;font-size:13px;font-family:'Oswald','Segoe UI',Arial,sans-serif;outline:none;resize:none;transition:border-color .2s;line-height:1.4;}
+    #icfAiInput:focus{border-color:#004080;}
+    #icfAiSend{background:#004080;border:none;border-radius:50%;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;transition:background .2s,transform .1s;}
+    #icfAiSend:hover{background:#00306a;transform:scale(1.06);}
+    #icfAiSend:disabled{background:#aaa;cursor:not-allowed;transform:none;}
+    #icfAiSend svg{width:16px;height:16px;stroke:#fff;}
+    .icf-clr{background:none;border:none;font-size:10px;color:#aaa;cursor:pointer;letter-spacing:.4px;text-transform:uppercase;font-family:'Oswald',sans-serif;padding:0 3px;transition:color .15s;}
+    .icf-clr:hover{color:#dc3545;}
+    .icf-pill{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:3px 9px;border-radius:12px;font-family:'Oswald',sans-serif;margin-bottom:7px;}
+    .icf-pill.ok{background:#d4edda;color:#155724;}.icf-pill.err{background:#f8d7da;color:#721c24;}.icf-pill.chk{background:#e2e3e5;color:#383d41;}
+    .icf-dot{width:6px;height:6px;border-radius:50%;}
+    .ok .icf-dot{background:#28a745;}.err .icf-dot{background:#dc3545;}.chk .icf-dot{background:#888;animation:icf-bnc .9s ease-in-out infinite;}
+    .icf-welcome{background:#fff;border:2px solid #c5d9f0;border-radius:11px;padding:16px;text-align:center;}
+    .icf-welcome-icon{font-size:30px;margin-bottom:7px;}
+    .icf-welcome-title{font-family:'Oswald',sans-serif;font-size:14px;color:#004080;font-weight:600;letter-spacing:.5px;margin-bottom:5px;}
+    .icf-welcome-body{font-size:12px;color:#555;line-height:1.6;}
+    .icf-foot{font-size:9px;color:#aaa;text-align:center;padding:3px;font-style:italic;font-family:'Oswald',sans-serif;}
+    @media(max-width:520px){#icfAiModal{max-height:93vh;border-radius:14px 14px 0 0;}}
 
-function showBanner()        {}
-function hideBanner()        { window.pwaCloseBanner(); }
-function showInstallSuccess(){ _pwaSuccess(); }
-function syncNavInstallBtn() {}
-function injectInstallBanner(){ _pwaInjectBanner(); }
+    /* ── Analysis dashboard ── */
+    .an-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px 20px;gap:14px;}
+    .an-spinner{width:44px;height:44px;border:4px solid #e4eaf2;border-top-color:#004080;border-radius:50%;animation:an-spin 0.8s linear infinite;}
+    @keyframes an-spin{to{transform:rotate(360deg);}}
+    .an-load-txt{font-family:'Oswald',sans-serif;font-size:13px;color:#607080;letter-spacing:.5px;}
+    .an-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px;}
+    .an-kpi{background:#fff;border:2px solid #d0dce8;border-radius:10px;padding:15px 12px;text-align:center;box-shadow:0 2px 8px rgba(0,64,128,.06);}
+    .an-kpi.g{border-color:#28a745;background:linear-gradient(135deg,#f0fff4,#fff);}
+    .an-kpi.r{border-color:#dc3545;background:linear-gradient(135deg,#fff5f5,#fff);}
+    .an-kpi.o{border-color:#f0a500;background:linear-gradient(135deg,#fffbf0,#fff);}
+    .an-kpi.p{border-color:#e91e8c;background:linear-gradient(135deg,#fff0f8,#fff);}
+    .an-kpi.b{border-color:#004080;background:linear-gradient(135deg,#f0f6ff,#fff);}
+    .an-kpi-val{font-family:'Oswald',sans-serif;font-size:26px;font-weight:700;color:#004080;line-height:1;}
+    .an-kpi.g .an-kpi-val{color:#28a745;}.an-kpi.r .an-kpi-val{color:#dc3545;}
+    .an-kpi.o .an-kpi-val{color:#b8860b;}.an-kpi.p .an-kpi-val{color:#e91e8c;}
+    .an-kpi-lbl{font-size:10px;color:#607080;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;font-family:'Oswald',sans-serif;}
+    .an-section{background:#fff;border:2px solid #d0dce8;border-radius:10px;overflow:hidden;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,64,128,.06);}
+    .an-section-hdr{background:linear-gradient(135deg,#004080,#1a6abf);color:#fff;padding:10px 16px;font-family:'Oswald',sans-serif;font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;display:flex;align-items:center;gap:8px;}
+    .an-section-hdr svg{width:14px;height:14px;stroke:#fff;fill:none;}
+    .an-section-body{padding:14px;}
+    .an-charts-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    .an-charts-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+    .an-chart-card{background:#f8fafd;border:1px solid #e0eaf5;border-radius:8px;padding:12px;}
+    .an-chart-label{font-family:'Oswald',sans-serif;font-size:11px;color:#004080;letter-spacing:.4px;text-transform:uppercase;text-align:center;margin-bottom:8px;font-weight:600;}
+    .an-chart-card canvas{max-height:200px;}
+    .an-tbl-wrap{overflow-x:auto;}
+    .an-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+    .an-tbl thead tr{background:linear-gradient(135deg,#004080,#1a6abf);}
+    .an-tbl th{padding:9px 12px;font-family:'Oswald',sans-serif;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#fff;text-align:left;white-space:nowrap;}
+    .an-tbl td{padding:8px 12px;border-bottom:1px solid #f0f4f8;}
+    .an-tbl tr:last-child td{border-bottom:none;}
+    .an-tbl tr:nth-child(even) td{background:#fafcff;}
+    .an-tbl tr:hover td{background:#eef5ff;}
+    .an-cov-cell{display:flex;align-items:center;gap:6px;}
+    .an-cov-bar{background:#e4eaf2;border-radius:3px;height:6px;flex:1;overflow:hidden;min-width:40px;}
+    .an-cov-fill{height:100%;border-radius:3px;}
+    .an-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;font-family:'Oswald',sans-serif;text-transform:uppercase;letter-spacing:.3px;}
+    .an-badge-g{background:#e8f5e9;color:#28a745;}.an-badge-o{background:#fff8e1;color:#b8860b;}.an-badge-r{background:#fdecea;color:#dc3545;}
+    .an-no-data{text-align:center;padding:50px 20px;color:#8090a0;font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:.5px;}
+    .an-no-data svg{width:40px;height:40px;stroke:#c0ccd8;margin-bottom:10px;}
+    @media(max-width:600px){.an-charts-2,.an-charts-3{grid-template-columns:1fr;}.an-kpi-row{grid-template-columns:repeat(2,1fr);}}
+    `;
+    document.head.appendChild(style);
 
-const CONFIG = {
-    SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbymRy-M5v0fVLWUjw4IXYhd1oIR2ZvnP_Dzr_iGR-Th0cMIpmE2ntGeujWYH7-C6NHIzA/exec',
-    SHEET_URL:  'https://docs.google.com/spreadsheets/d/1cXlYiTMzcRP1BCj9mt1JXoK_pjgWbRtDEEQUPMg2HPs/edit?usp=sharing',
-    CSV_FILE:   'cascading_data.csv',
-    ADMIN_USER: 'admin',
-    ADMIN_PASS: 'admin123'
-};
-
-// ============================================
-// STATE
-// ============================================
-const state = {
-    currentSection: 1,
-    totalSections:  5,
-    isOnline:       navigator.onLine,
-    pendingSubmissions: [],
-    drafts:         [],
-    submittedSchools: [],
-    signaturePads:  {},
-    formStatus:     'draft',
-    currentDraftId: null,
-    charts:         {},
-    currentUser:    null,
-    isAdmin:        false
-};
-window.state = state;   // expose for ai_agent.js to read submittedSchools / pendingSubmissions
-
-var ALL_LOCATION_DATA = {};
-var USER_MAP      = {};
-var LOCATION_DATA  = {};
-let deferredPrompt    = null;
-
-// ============================================
-// CACHE IMAGES FOR OFFLINE USE
-// ============================================
-function cacheImagesForOffline() {
-    const imagesToCache = [
-        'ICF-SL.jpg','logo_mohs.png','logo_nmcp.png','logo_pmi.png',
-        'infographics.png','favicon.svg','icon-192.svg','video.mp4'
-    ];
-    if ('caches' in window) {
-        caches.open('itn-images-v1').then(cache => {
-            imagesToCache.forEach(imageUrl => {
-                fetch(imageUrl, { mode: 'no-cors' })
-                    .then(response => { if (response.ok) cache.put(imageUrl, response); })
-                    .catch(() => {
-                        const fallback = {
-                            'ICF-SL.jpg': 'https://github.com/mohamedsillahkanu/gdp-dashboard-2/raw/6c7463b0d5c3be150aafae695a4bcbbd8aeb1499/ICF-SL.jpg',
-                            'infographics.png': 'https://raw.githubusercontent.com/mohamedsillahkanu/gdp-dashboard-2/main/infographics.png'
-                        };
-                        if (fallback[imageUrl]) {
-                            fetch(fallback[imageUrl], { mode: 'no-cors' })
-                                .then(r => { if (r.ok) cache.put(imageUrl, r); })
-                                .catch(() => {});
-                        }
-                    });
-            });
-        });
-    }
-}
-
-// ============================================
-// PWA SERVICE WORKER
-// ============================================
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js')
-            .then(reg => {
-                console.log('[PWA] Service Worker registered');
-                reg.addEventListener('updatefound', () => {
-                    const nw = reg.installing;
-                    nw.addEventListener('statechange', () => {
-                        if (nw.state === 'installed' && navigator.serviceWorker.controller)
-                            showNotification('New version available! Refresh to update.', 'info');
-                    });
-                });
-                cacheImagesForOffline();
-            })
-            .catch(err => console.error('[PWA] SW registration failed:', err));
-    });
-}
-
-// ============================================
-// PWA INSTALL PROMPT
-// ============================================
-// ============================================
-// PWA INSTALL BANNER
-// ============================================
-
-// Declare globals FIRST — before any HTML onclick="" could fire them
-window.pwaDoInstall = async function() {
-    if (!deferredPrompt) { console.warn('[PWA] No prompt'); return; }
-    const btn = document.getElementById('pwaInstallBtn');
-    if (btn) { btn.textContent = 'Installing…'; btn.disabled = true; }
-    try {
-        deferredPrompt.prompt();
-        const { outcome } = await deferredPrompt.userChoice;
-        deferredPrompt = null;
-        if (outcome === 'accepted') {
-            _pwaSuccess();
-        } else {
-            _pwaBannerHide();
-            if (btn) { btn.textContent = 'INSTALL'; btn.disabled = false; }
-        }
-    } catch(e) {
-        console.error('[PWA]', e);
-        if (btn) { btn.textContent = 'INSTALL'; btn.disabled = false; }
-    }
-};
-window.pwaCloseBanner = function() { _pwaBannerHide(); };
-
-function _pwaBannerShow() {
-    const b = document.getElementById('pwaInstallBanner');
-    if (b) setTimeout(() => { b.style.bottom = '16px'; }, 80);
-}
-function _pwaBannerHide() {
-    const b = document.getElementById('pwaInstallBanner');
-    if (b) b.style.bottom = '-120px';
-}
-function _pwaSuccess() {
-    const c = document.getElementById('pwaInstallContent');
-    if (c) c.innerHTML = `
-      <div style="width:38px;height:38px;background:#28a745;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" width="22" height="22"><polyline points="20 6 9 17 4 12"/></svg>
-      </div>
-      <div style="flex:1;">
-        <div style="font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;color:#fff;">Installed! Open from your home screen.</div>
-        <div style="font-size:11px;color:rgba(255,255,255,.75);margin-top:2px;">SBD 2026 works fully offline ✓</div>
-      </div>`;
-    const b = document.getElementById('pwaInstallBanner');
-    if (b) b.style.border = '1.5px solid rgba(40,167,69,.7)';
-    setTimeout(_pwaBannerHide, 3500);
-}
-function _pwaSyncNavBtn(show) {
-    const btn = document.getElementById('installBtn');
-    if (btn) btn.style.display = show ? 'inline-flex' : 'none';
-}
-function _pwaInjectBanner() {
-    if (document.getElementById('pwaInstallBanner')) return;
-    const b = document.createElement('div');
-    b.id = 'pwaInstallBanner';
-    // Use setAttribute for inline style — immune to CSS overrides
-    b.setAttribute('style',
-        'position:fixed;bottom:-120px;left:50%;transform:translateX(-50%);' +
-        'width:calc(100% - 24px);max-width:520px;' +
-        'background:linear-gradient(135deg,#002952,#004080);' +
-        'border-radius:14px;padding:13px 14px;' +
-        'box-shadow:0 -2px 30px rgba(0,0,0,.4),0 8px 30px rgba(0,0,0,.3);' +
-        'border:1.5px solid rgba(200,153,26,.45);' +
-        'z-index:2147483647;' +
-        'transition:bottom .4s cubic-bezier(.34,1.56,.64,1);' +
-        'box-sizing:border-box;pointer-events:all;'
-    );
-    b.innerHTML =
-        '<div id="pwaInstallContent" style="display:flex;align-items:center;gap:11px;pointer-events:all;">' +
-          '<div style="width:42px;height:42px;background:#fff;border-radius:10px;flex-shrink:0;' +
-               'overflow:hidden;display:flex;align-items:center;justify-content:center;' +
-               'border:2px solid rgba(200,153,26,.4);">' +
-            '<img src="./icons/icon-192.png" width="38" height="38" style="object-fit:contain;" ' +
-            '>' +
-          '</div>' +
-          '<div style="flex:1;min-width:0;">' +
-            '<div style="font-family:Oswald,sans-serif;font-size:13px;font-weight:700;color:#fff;' +
-                 'letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' +
-              'SBD 2026 — ITN Survey' +
-            '</div>' +
-            '<div style="font-size:11px;color:rgba(255,255,255,.72);margin-top:2px;">' +
-              'Install for offline use &amp; quick access' +
-            '</div>' +
-          '</div>' +
-          '<button id="pwaInstallBtn" ' +
-            'onclick="window.pwaDoInstall()" ' +
-            'style="background:#c8991a;color:#fff;border:none;border-radius:8px;' +
-                   'padding:10px 20px;font-family:Oswald,sans-serif;font-size:13px;' +
-                   'font-weight:700;letter-spacing:.6px;cursor:pointer;white-space:nowrap;' +
-                   'flex-shrink:0;pointer-events:all;' +
-                   '-webkit-tap-highlight-color:rgba(0,0,0,0);touch-action:manipulation;">' +
-            'INSTALL' +
-          '</button>' +
-          '<button ' +
-            'onclick="window.pwaCloseBanner()" ' +
-            'style="background:rgba(255,255,255,.16);color:#fff;border:none;border-radius:6px;' +
-                   'min-width:32px;height:32px;cursor:pointer;font-size:18px;flex-shrink:0;' +
-                   'display:flex;align-items:center;justify-content:center;pointer-events:all;' +
-                   '-webkit-tap-highlight-color:rgba(0,0,0,0);touch-action:manipulation;">' +
-            '&#x2715;' +
-          '</button>' +
-        '</div>';
-    document.body.appendChild(b);
-}
-
-window.addEventListener('beforeinstallprompt', e => {
-    e.preventDefault();
-    deferredPrompt = e;
-    // Update the existing HTML install button to show it's ready
-    const btn = document.getElementById('installBtn');
-    if (btn) {
-        btn.textContent = 'INSTALL';
-        btn.disabled    = false;
-        btn.style.background = '#28a745'; // green = ready to install
-    }
-    _pwaInjectBanner();
-    _pwaBannerShow();
-    console.log('[PWA] Install prompt ready — button active');
-});
-
-window.addEventListener('appinstalled', () => {
-    deferredPrompt = null;
-    _pwaSuccess();
-    const banner = document.getElementById('installBanner');
-    if (banner) banner.style.display = 'none';
-    console.log('[PWA] Installed');
-});
-
-// Global install handler — called directly by onclick
-window.pwaInstallClick = async function() {
-    console.log('[PWA] Install clicked, prompt available:', !!deferredPrompt);
-    if (deferredPrompt) {
-        const btn = document.getElementById('installBtn');
-        if (btn) { btn.textContent = 'Installing…'; btn.disabled = true; }
-        try {
-            deferredPrompt.prompt();
-            const { outcome } = await deferredPrompt.userChoice;
-            deferredPrompt = null;
-            if (outcome === 'accepted') {
-                if (btn) { btn.textContent = '✓ Installed!'; btn.style.background = '#28a745'; }
-                showNotification('Installed! Open from your home screen.', 'success');
-                setTimeout(() => {
-                    const b = document.getElementById('installBanner');
-                    if (b) b.style.display = 'none';
-                }, 3000);
-            } else {
-                if (btn) { btn.textContent = 'INSTALL'; btn.disabled = false; }
-            }
-        } catch(e) {
-            console.error('[PWA]', e);
-            const btn2 = document.getElementById('installBtn');
-            if (btn2) { btn2.textContent = 'INSTALL'; btn2.disabled = false; }
-        }
-        return;
-    }
-    // No prompt — show instructions using app notification (not alert)
-    const isIOS     = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    const isAndroid = /android/i.test(navigator.userAgent);
-    if (isIOS)
-        showNotification('Tap Share (↑) then "Add to Home Screen"', 'info');
-    else if (isAndroid)
-        showNotification('Tap browser menu (⋮) → "Add to Home Screen" or "Install App"', 'info');
-    else
-        showNotification('Click the install icon (⊕) in your browser address bar', 'info');
-};
-
-function setupInstallButton() {
-    const btn = document.getElementById('installBtn');
-    if (!btn) return;
-    // Running as installed PWA — hide banner
-    if (window.matchMedia('(display-mode: standalone)').matches ||
-        window.navigator.standalone === true) {
-        const b = document.getElementById('installBanner');
-        if (b) b.style.display = 'none';
-        return;
-    }
-    btn.style.display = 'inline-flex';
-    btn.style.opacity = '1';
-    btn.setAttribute('onclick', 'window.pwaInstallClick()');
-}
-
-function showBanner()        { _pwaBannerShow(); }
-function hideBanner()        { _pwaBannerHide(); }
-function showInstallSuccess(){ _pwaSuccess(); }
-function syncNavInstallBtn(s){}
-function injectInstallBanner(){ _pwaInjectBanner(); }
-
-// ============================================
-// APP UPDATE
-// ============================================
-window.updateApp = async function() {
-    const btn = document.getElementById('updateAppBtn');
-    if (!btn) return;
-    btn.disabled = true;
-    btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> UPDATING...';
-    showNotification('Clearing cache and updating…', 'info');
-    try {
-        // Tell active SW to skip waiting
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
-            navigator.serviceWorker.controller.postMessage({ type: 'CLEAR_CACHE' });
-        }
-        // Unregister all service workers
-        if ('serviceWorker' in navigator) {
-            const regs = await navigator.serviceWorker.getRegistrations();
-            for (const r of regs) await r.unregister();
-        }
-        // Wipe all caches
-        if ('caches' in window) {
-            const names = await caches.keys();
-            await Promise.all(names.map(n => caches.delete(n)));
-        }
-        showNotification('Update complete! Reloading…', 'success');
-        setTimeout(() => window.location.reload(true), 800);
-    } catch (err) {
-        console.error('[Update] Failed:', err);
-        showNotification('Update failed — try again.', 'error');
-        btn.disabled = false;
-        btn.innerHTML = '<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg> UPDATE';
-    }
-};
-
-// ============================================
-// INITIALIZATION
-// ============================================
-async function init() {
-    loadFromStorage();
-    injectSummaryModal();
-    setupInstallButton();
-    try {
-        await loadLocationData();
-    } catch (e) {
-        console.warn('Could not load location data:', e);
-    }
-    // showLoginScreen is overridden by ai_agent.js to auto-start without login
-    showLoginScreen();
-}
-
-function loadFromStorage() {
-    try {
-        state.pendingSubmissions = JSON.parse(localStorage.getItem('itn_pending')   || '[]');
-        state.drafts             = JSON.parse(localStorage.getItem('itn_drafts')    || '[]');
-        state.submittedSchools   = JSON.parse(localStorage.getItem('itn_submitted') || '[]');
-    } catch (e) {
-        state.pendingSubmissions = [];
-        state.drafts = [];
-        state.submittedSchools = [];
-    }
-}
-
-function saveToStorage() {
-    localStorage.setItem('itn_pending',   JSON.stringify(state.pendingSubmissions));
-    localStorage.setItem('itn_drafts',    JSON.stringify(state.drafts));
-    localStorage.setItem('itn_submitted', JSON.stringify(state.submittedSchools));
-}
-
-function setDefaultDate() {
-    const today = new Date().toISOString().split('T')[0];
-    const s = document.getElementById('survey_date');
-    const d = document.getElementById('distribution_date');
-    if (s && !s.value) s.value = today;
-    if (d && !d.value) d.value = today;
-}
-
-function formatDate(dateString) {
-    if (!dateString) return '—';
-    try {
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) return dateString;
-        return date.toLocaleString('en-SL', {
-            year: 'numeric', month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit'
-        });
-    } catch (e) { return dateString; }
-}
-
-// ============================================
-// INJECT SUMMARY MODAL
-// ============================================
-function injectSummaryModal() {
-    if (document.getElementById('summaryModal')) return;
+    // ════════════════════════════════════════════════════════
+    //  AI AGENT MODAL HTML
+    // ════════════════════════════════════════════════════════
     document.body.insertAdjacentHTML('beforeend', `
-    <div class="modal-overlay" id="summaryModal">
-      <div class="modal-content large" id="summaryModalContent">
-        <div class="modal-header" style="background:#004080;">
-          <span class="modal-title">
-            <svg class="modal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
-            </svg>SCHOOL COVERAGE SUMMARY
-          </span>
-          <button class="modal-close" onclick="closeSummaryModal()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
+    <div id="icfAiOverlay" onclick="icfAiOverlayClick(event)">
+      <div id="icfAiModal">
+        <div class="icf-ai-head">
+          <div class="icf-ai-head-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+          </div>
+          <div class="icf-ai-head-info">
+            <div class="icf-ai-head-title">ICF Data Agent</div>
+            <div class="icf-ai-head-sub">AI · Google Apps Script + Claude</div>
+          </div>
+          <div class="icf-ai-head-actions">
+            <button class="icf-ai-hbtn gold" onclick="icfAiRefreshStats()">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 2v6h-6M3 12a9 9 0 0115.36-6.36L21 8M3 22v-6h6M21 12a9 9 0 01-15.36 6.36L3 16"/></svg>SYNC
+            </button>
+            <button class="icf-ai-hbtn" onclick="icfAiClose()">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>CLOSE
+            </button>
+          </div>
+        </div>
+        <div class="icf-ai-stats" id="icfAiStats"><div style="margin:auto;font-size:11px;color:#888;">Loading…</div></div>
+        <div id="icfAiMessages">
+          <div class="icf-welcome">
+            <div class="icf-welcome-icon">🤖</div>
+            <div class="icf-welcome-title">Hello! I'm your ICF Data Agent.</div>
+            <div class="icf-welcome-body">I analyse all submitted ITN data — coverage, enrollment, gender breakdown, class-level stats and more.<br><br>Powered by <strong>Google Apps Script + Claude AI</strong>. API key stays securely on the server.</div>
+          </div>
+          <div id="icfGasStatus"></div>
+        </div>
+        <div class="icf-samples">
+          <div class="icf-sq-lbl">✦ Try asking</div>
+          <div class="icf-sq-row" id="icfSqRow"></div>
+        </div>
+        <div class="icf-inp-row">
+          <button class="icf-clr" onclick="icfAiClearChat()">↺ Clear</button>
+          <textarea id="icfAiInput" rows="1" placeholder="Ask about the ITN distribution data…"
+            onkeydown="icfAiKeydown(event)" oninput="icfAiAutoResize(this)"></textarea>
+          <button id="icfAiSend" onclick="icfAiSend()">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </div>
-        <div class="modal-body" id="summaryModalBody"></div>
-      </div>
-    </div>
-    <div class="modal-overlay" id="schoolDetailModal">
-      <div class="modal-content large" id="schoolDetailContent">
-        <div class="modal-header" style="background:#004080;">
-          <span class="modal-title" id="schoolDetailTitle">SCHOOL DETAIL</span>
-          <button class="modal-close" onclick="closeSchoolDetailModal()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-            </svg>
-          </button>
-        </div>
-        <div class="modal-body" id="schoolDetailBody"></div>
+        <div class="icf-foot">Session state + ICF-SL Server · API key never leaves the server</div>
       </div>
     </div>`);
-}
 
-// ============================================
-// USER MANAGEMENT  (login removed — auto-start via ai_agent.js)
-// ============================================
-function showLoginScreen() {
-    // This is overridden by ai_agent.js patchAutoStart() to skip login.
-    // Fallback: show loginScreen if it somehow becomes visible
-    const ls = document.getElementById('loginScreen');
-    if (ls) ls.style.display = 'none';
-    const am = document.getElementById('appMain');
-    if (am) am.style.display = 'flex';
-    // Trigger startApp directly
-    state.currentUser = 'admin';
-    state.isAdmin     = true;
-    LOCATION_DATA     = ALL_LOCATION_DATA;
-    startApp('ICF-SL', true);
-}
+    // ════════════════════════════════════════════════════════
+    //  SHARED HELPERS
+    // ════════════════════════════════════════════════════════
+    const SAMPLES = [
+        'How many schools have been submitted?','What is the overall ITN coverage rate?',
+        'Which district has the most submissions?','Show coverage breakdown by gender',
+        'How many ITNs were distributed in total?','List schools with coverage below 80%',
+        'What is average enrollment per school?','How many schools are still pending?',
+        'Compare boys vs girls ITN coverage','Which schools received IG2 nets?',
+        'How many ITNs remain after distribution?','Give me a summary by chiefdom',
+        'Which class has the highest coverage?','Who submitted the most records?',
+    ];
+    function pickN(n){const p=[...SAMPLES],o=[];while(o.length<n&&p.length){const i=Math.floor(Math.random()*p.length);o.push(p.splice(i,1)[0]);}return o;}
 
-function hideLoginScreen() {
-    const ls = document.getElementById('loginScreen');
-    if (ls) ls.style.display = 'none';
-    const am = document.getElementById('appMain');
-    if (am) { am.style.display = 'flex'; am.style.flexDirection = 'column'; }
-    cacheImagesForOffline();
-}
-
-window.handleLogin = function() {
-    // No-op: login not required. Auto-started by ai_agent.js / showLoginScreen override.
-    state.currentUser = 'admin';
-    state.isAdmin     = true;
-    LOCATION_DATA     = ALL_LOCATION_DATA;
-    startApp('ICF-SL', true);
-};
-
-function startApp(displayName, isAdmin) {
-    // Null-safe: currentUserDisplay and adminBadge may not exist if login UI removed
-    const displayEl = document.getElementById('currentUserDisplay');
-    if (displayEl) displayEl.textContent = displayName;
-    const badge = document.getElementById('adminBadge');
-    if (badge) badge.style.display = isAdmin ? 'inline' : 'none';
-
-    const sbField = document.getElementById('submitted_by');
-    if (sbField) sbField.value = state.currentUser || '';
-
-    hideLoginScreen();
-    updateOnlineStatus();
-    updateCounts();
-    setupEventListeners();
-    populateDistricts();
-    setupCascading();
-    setupSchoolSubmissionCheck();
-    setupValidation();
-    setupPhoneValidation();
-    setupNameValidation();
-    setupCalculations();
-    setupAutoSave();
-    initAllSignaturePads();
-    captureGPS();
-    setDefaultDate();
-    updateProgress();
-    updateSummaryBadge();
-    restoreDraftIfExists();
-
-    showNotification('Welcome to ICF Collect!', 'success');
-}
-
-window.handleLogout = function() {
-    // Overridden by ai_agent.js to be a no-op. Kept as fallback.
-};
-
-// ============================================
-// USER MAP
-// ============================================
-function buildUserMap(rows) {
-    USER_MAP = {};
-    rows.forEach(row => {
-        const u = (row.username || '').trim().toLowerCase();
-        if (!u) return;
-        if (!USER_MAP[u]) USER_MAP[u] = [];
-        USER_MAP[u].push(row);
-    });
-}
-
-// ── CSV column reader — robust against BOM, extra spaces, case variations ──────
-// Normalised key map built once from the first data row
-let _csvKeyMap = null;   // { 'district': 'District', 'name of phu': 'Name of PHU', ... }
-
-function buildCsvKeyMap(firstRow) {
-    _csvKeyMap = {};
-    Object.keys(firstRow).forEach(k => {
-        const clean = k.replace(/^\uFEFF/, '').trim().toLowerCase();
-        _csvKeyMap[clean] = k;
-    });
-    console.log('[CSV] Headers detected:', Object.values(_csvKeyMap));
-}
-
-function csvCol(row, ...names) {
-    for (const n of names) {
-        // 1. Exact key match
-        const v = (row[n] || '').trim();
-        if (v) return v;
-        // 2. Normalised match (handles BOM / spaces / case)
-        if (_csvKeyMap) {
-            const orig = _csvKeyMap[n.toLowerCase()];
-            if (orig) {
-                const v2 = (row[orig] || '').trim();
-                if (v2) return v2;
-            }
-        }
+    function md(t){
+        return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>')
+            .replace(/`(.+?)`/g,'<code>$1</code>')
+            .replace(/^#{1,3} (.+)$/gm,'<strong style="font-size:13px;text-transform:uppercase;letter-spacing:.5px;color:#004080;display:block;margin-top:6px">$1</strong>')
+            .replace(/^- (.+)$/gm,'<span style="display:block;padding-left:14px;margin:2px 0">• $1</span>')
+            .replace(/\n\n/g,'<br><br>').replace(/\n/g,'<br>');
     }
-    return '';
-}
 
-function buildFilteredLocationData(rows) {
-    if (rows.length > 0) buildCsvKeyMap(rows[0]);
-    const f = {};
-    rows.forEach(row => {
-        const d   = csvCol(row, 'District',    'adm1');
-        const c   = csvCol(row, 'Chiefdom',    'adm2');
-        const fac = csvCol(row, 'Name of PHU', 'hf',   'adm3');
-        const com = csvCol(row, 'Community',   'community');
-        const sch = csvCol(row, 'School Name', 'school_name');
-        if (!d || !c || !fac || !com || !sch) return;
-        if (!f[d]) f[d]={};
-        if (!f[d][c]) f[d][c]={};
-        if (!f[d][c][fac]) f[d][c][fac]={};
-        if (!f[d][c][fac][com]) f[d][c][fac][com]=[];
-        if (!f[d][c][fac][com].includes(sch)) f[d][c][fac][com].push(sch);
-    });
-    for (const d in f) for (const c in f[d]) for (const fac in f[d][c])
-        for (const com in f[d][c][fac])
-            f[d][c][fac][com].sort();
-    return f;
-}
+    function covColor(p){return p>=80?'#28a745':p>=50?'#f0a500':'#dc3545';}
+    function covBadge(p){const c=p>=80?'g':p>=50?'o':'r';return`<span class="an-badge an-badge-${c}">${p}%</span>`;}
 
-// ============================================
-// LOCATION DATA (CSV)
-// ============================================
-function loadLocationData() {
-    return new Promise((resolve, reject) => {
-        Papa.parse(CONFIG.CSV_FILE, {
-            download: true,
-            header: true,
-            skipEmptyLines: true,
-            transformHeader: h => h.replace(/^\uFEFF/, '').trim(), // strip BOM + spaces from headers
-            complete(results) {
-                ALL_LOCATION_DATA = {};
-                if (!results.data || results.data.length === 0) {
-                    console.warn('[CSV] No data rows in', CONFIG.CSV_FILE);
-                    LOCATION_DATA = ALL_LOCATION_DATA;
-                    resolve(); return;
-                }
+    // ════════════════════════════════════════════════════════
+    //  GAS CALLS
+    // ════════════════════════════════════════════════════════
+    async function callGAS(msg, history, context){
+        const res=await fetch(GAS_URL,{method:'POST',redirect:'follow',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({action:'ai_query',message:msg,history:(history||[]).slice(-10),context:context||''})});
+        if(!res.ok)throw new Error('GAS HTTP '+res.status);
+        const d=await res.json();if(!d.success)throw new Error(d.error||'GAS error');return d.reply;
+    }
 
-                buildCsvKeyMap(results.data[0]);
-                buildUserMap(results.data);
+    async function fetchSheetData(){
+        // ── Method 1: GAS ?action=getData (15s timeout) ────────
+        try{
+            const res=await Promise.race([
+                fetch(GAS_URL+'?action=getData'),
+                new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')),15000))
+            ]);
+            if(res.ok){
+                const d=await res.json();
+                const rows=d.rows||d.data||(Array.isArray(d)?d:null);
+                if(rows&&rows.length>0){console.log('[Analysis] Loaded',rows.length,'rows from GAS');return rows;}
+            }
+        }catch(e){console.warn('[Analysis] GAS getData:',e.message);}
 
-                let loaded = 0, skipped = 0;
-                const _seenKeys  = new Set();    // full 5-part keys seen so far
-                const _dupRows   = [];           // duplicate rows found
-                window.CSV_DUPLICATES = [];      // expose for ai_agent.js Targets tab
-
-                results.data.forEach((row, rowIdx) => {
-                    const d   = csvCol(row, 'District',    'adm1');
-                    const c   = csvCol(row, 'Chiefdom',    'adm2');
-                    const fac = csvCol(row, 'Name of PHU', 'hf', 'adm3');
-                    const com = csvCol(row, 'Community',   'community');
-                    const sch = csvCol(row, 'School Name', 'school_name');
-                    if (!d || !c || !fac || !com || !sch) { skipped++; return; }
-
-                    // Full 5-part uniqueness key
-                    const fullKey = [d,c,fac,com,sch].map(v=>v.trim().toLowerCase()).join('|');
-
-                    if (_seenKeys.has(fullKey)) {
-                        // Duplicate — record it but do NOT add to location data again
-                        _dupRows.push({ row: rowIdx + 2, district: d, chiefdom: c, phu: fac, community: com, school: sch, key: fullKey });
-                        return;
-                    }
-                    _seenKeys.add(fullKey);
-
-                    if (!ALL_LOCATION_DATA[d]) ALL_LOCATION_DATA[d]={};
-                    if (!ALL_LOCATION_DATA[d][c]) ALL_LOCATION_DATA[d][c]={};
-                    if (!ALL_LOCATION_DATA[d][c][fac]) ALL_LOCATION_DATA[d][c][fac]={};
-                    if (!ALL_LOCATION_DATA[d][c][fac][com]) ALL_LOCATION_DATA[d][c][fac][com]=[];
-                    ALL_LOCATION_DATA[d][c][fac][com].push(sch);
-                    loaded++;
+        // ── Method 2: Direct ICF-SL Server CSV export ───────────
+        try{
+            const csvUrl=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`;
+            const rows=await new Promise((resolve,reject)=>{
+                Papa.parse(csvUrl,{
+                    download:true,header:true,skipEmptyLines:true,
+                    complete:r=>resolve(r.data||[]),
+                    error:reject
                 });
+            });
+            if(rows&&rows.length>0){console.log('[Analysis] Loaded',rows.length,'rows from CSV export');return rows;}
+        }catch(e){console.warn('[Analysis] CSV export:',e.message);}
 
-                // Expose duplicates for the Targets tab warning
-                window.CSV_DUPLICATES = _dupRows;
-                if (_dupRows.length > 0) {
-                    console.warn(`[CSV] ${_dupRows.length} duplicate row(s) found and skipped:`);
-                    _dupRows.forEach(r => console.warn(`  Row ${r.row}: ${r.district} > ${r.chiefdom} > ${r.phu} > ${r.community} > ${r.school}`));
+        console.warn('[Analysis] Sheet fetch failed — local data only');
+        return[];
+    }
+
+    async function fetchCount(){
+        try{const r=await fetch(GAS_URL+'?action=count');const d=await r.json();return d.count!==undefined?d.count:'?';}catch{return'?';}
+    }
+
+    // Build targets from the already-loaded CSV cascading data.
+    // Key = district|chiefdom|phu|community|school_name (same school name in different community = different school)
+    function buildTargetsFromCSV() {
+        // Key = district|chiefdom|phu|community|school — all 5 parts
+        const data = window.ALL_LOCATION_DATA || {};
+        const targets = {};
+
+        for (const district in data) {
+            const dk = district.trim().toLowerCase();
+            const dSet = new Set();
+
+            for (const chiefdom in data[district]) {
+                const ck = chiefdom.trim().toLowerCase();
+                const cSet = new Set();
+
+                for (const phu in data[district][chiefdom]) {
+                    const pk = phu.trim().toLowerCase();
+                    const pSet = new Set();
+
+                    for (const community in data[district][chiefdom][phu]) {
+                        const comk = community.trim().toLowerCase();
+                        const schools = data[district][chiefdom][phu][community];
+                        if (!Array.isArray(schools)) continue;
+                        schools.forEach(s => {
+                            if (!s) return;
+                            const fullKey = dk+'|'+ck+'|'+pk+'|'+comk+'|'+s.trim().toLowerCase();
+                            pSet.add(fullKey);
+                            cSet.add(fullKey);
+                            dSet.add(fullKey);
+                        });
+                    }
+                    if (pSet.size > 0) targets[dk+'|'+ck+'|'+pk] = pSet.size;
                 }
-
-                for (const d in ALL_LOCATION_DATA) for (const c in ALL_LOCATION_DATA[d])
-                    for (const fac in ALL_LOCATION_DATA[d][c])
-                        for (const com in ALL_LOCATION_DATA[d][c][fac])
-                            ALL_LOCATION_DATA[d][c][fac][com].sort();
-
-                // Expose for cascading dropdowns
-                LOCATION_DATA = ALL_LOCATION_DATA;
-                window.ALL_LOCATION_DATA = ALL_LOCATION_DATA;   // ai_agent.js reads window.ALL_LOCATION_DATA
-                window.LOCATION_DATA     = ALL_LOCATION_DATA;
-
-                const dCount = Object.keys(ALL_LOCATION_DATA).length;
-                console.log(`[CSV] ${loaded} rows loaded → ${dCount} district(s). Skipped: ${skipped}`);
-                if (dCount === 0) {
-                    console.error('[CSV] No districts loaded! Check CSV column names:', Object.values(_csvKeyMap || {}));
-                }
-                resolve();
-            },
-            error(err) {
-                console.error('[CSV] Parse error:', err);
-                reject(err);
+                if (cSet.size > 0) targets[dk+'|'+ck] = cSet.size;
             }
+            if (dSet.size > 0) targets[dk] = dSet.size;
+        }
+        return targets;
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  DATA MERGE  (GAS sheet + localStorage)
+    // ════════════════════════════════════════════════════════
+    let _sheetRows = [];   // cached from last GAS fetch
+
+    function getLocalRows(){
+        const s=window.state||{};
+        return[...(s.submittedSchools||[]).map(r=>r.data||r),...(s.pendingSubmissions||[])];
+    }
+
+    function mergeData(sheetRows){
+        // If we have fresh sheet data, use it as the source of truth.
+        // Only fall back to local data when sheet is unavailable.
+        if(sheetRows && sheetRows.length > 0) return sheetRows;
+        // Sheet unavailable — use local pending/submitted data
+        return getLocalRows();
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  ANALYSIS CASCADING FILTERS
+    // ════════════════════════════════════════════════════════
+    function getLoc(){return(window.ALL_LOCATION_DATA&&Object.keys(window.ALL_LOCATION_DATA).length)?window.ALL_LOCATION_DATA:window.LOCATION_DATA||{};}
+
+    function afOpt(sel,opts,disabled){
+        const el=document.getElementById(sel);if(!el)return;
+        const cur=el.value;
+        el.innerHTML='<option value="">All</option>';
+        opts.sort().forEach(o=>{const op=document.createElement('option');op.value=op.textContent=o;el.appendChild(op);});
+        if(cur&&[...el.options].some(o=>o.value===cur))el.value=cur;
+        el.disabled=!!disabled;
+    }
+
+    // Structure: loc[district][chiefdom][phu][community] = [schools]
+    window.afCascade=function(level){
+        const loc=getLoc();
+        const d  =()=>document.getElementById('af_district' )?.value||'';
+        const c  =()=>document.getElementById('af_chiefdom' )?.value||'';
+        const f  =()=>document.getElementById('af_facility' )?.value||'';
+        const co =()=>document.getElementById('af_community')?.value||'';
+
+        const resetBelow=(...ids)=>ids.forEach(id=>{
+            const el=document.getElementById(id);
+            if(el){el.innerHTML='<option value="">All</option>';el.disabled=true;}
         });
-    });
-}
 
-function populateDistricts() {
-    const sel = document.getElementById('district');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">Select District...</option>';
-    Object.keys(LOCATION_DATA).sort().forEach(d => {
-        const o = document.createElement('option');
-        o.value = d; o.textContent = d; sel.appendChild(o);
-    });
-    updateCount('district', Object.keys(LOCATION_DATA).length);
-}
+        if(level==='district'){
+            resetBelow('af_chiefdom','af_facility','af_community','af_school');
+            if(d()&&loc[d()]) afOpt('af_chiefdom',Object.keys(loc[d()]),false);
 
-// Structure: LOCATION_DATA[district][chiefdom][phu][community] = [schools]
-function setupCascading() {
-    const district  = document.getElementById('district');
-    const chiefdom  = document.getElementById('chiefdom');
-    const facility  = document.getElementById('facility');   // PHU
-    const community = document.getElementById('community');
-    const school    = document.getElementById('school_name');
-    if (!district) return;
+        }else if(level==='chiefdom'){
+            resetBelow('af_facility','af_community','af_school');
+            if(d()&&c()&&loc[d()]?.[c()]) afOpt('af_facility',Object.keys(loc[d()][c()]),false);
 
-    // Hide / disable the section field since new CSV has no Section level
-    const sectionWrap = document.getElementById('section_loc')?.closest('.form-group, .fg, div[class]');
-    const sectionEl   = document.getElementById('section_loc');
-    if (sectionEl) {
-        sectionEl.value = '';
-        sectionEl.disabled = true;
-        // Hide the parent wrapper if it exists
-        if (sectionWrap && sectionWrap !== document.body) sectionWrap.style.display = 'none';
-    }
+        }else if(level==='facility'){
+            resetBelow('af_community','af_school');
+            if(d()&&c()&&f()&&loc[d()]?.[c()]?.[f()])
+                afOpt('af_community',Object.keys(loc[d()][c()][f()]),false);
 
-    district.addEventListener('change', function() {
-        resetSelect(chiefdom,  'Select Chiefdom...');
-        resetSelect(facility,  'Select Health Facility...');
-        resetSelect(community, 'Select Community...');
-        resetSelect(school,    'Select School...');
-        ['chiefdom','facility','community','school_name'].forEach(clearCount);
-        const d = this.value;
-        if (d && LOCATION_DATA[d]) {
-            chiefdom.disabled = false;
-            Object.keys(LOCATION_DATA[d]).sort().forEach(c => appendOpt(chiefdom, c));
-            updateCount('chiefdom', Object.keys(LOCATION_DATA[d]).length);
+        }else if(level==='community'){
+            resetBelow('af_school');
+            const schools=loc[d()]?.[c()]?.[f()]?.[co()];
+            if(schools) afOpt('af_school',schools,false);
         }
-    });
+        runAnalysis();
+    };
 
-    chiefdom.addEventListener('change', function() {
-        resetSelect(facility,  'Select Health Facility...');
-        resetSelect(community, 'Select Community...');
-        resetSelect(school,    'Select School...');
-        ['facility','community','school_name'].forEach(clearCount);
-        const d=district.value, c=this.value;
-        if (d && c && LOCATION_DATA[d]?.[c]) {
-            facility.disabled = false;
-            Object.keys(LOCATION_DATA[d][c]).sort().forEach(f => appendOpt(facility, f));
-            updateCount('facility', Object.keys(LOCATION_DATA[d][c]).length);
-        }
-    });
-
-    facility.addEventListener('change', function() {
-        resetSelect(community, 'Select Community...');
-        resetSelect(school,    'Select School...');
-        ['community','school_name'].forEach(clearCount);
-        const d=district.value, c=chiefdom.value, f=this.value;
-        if (d && c && f && LOCATION_DATA[d]?.[c]?.[f]) {
-            community.disabled = false;
-            Object.keys(LOCATION_DATA[d][c][f]).sort().forEach(com => appendOpt(community, com));
-            updateCount('community', Object.keys(LOCATION_DATA[d][c][f]).length);
-        }
-    });
-
-    community.addEventListener('change', function() {
-        resetSelect(school, 'Select School...');
-        clearCount('school_name');
-        const d=district.value, c=chiefdom.value, f=facility.value, com=this.value;
-        if (d && c && f && com && LOCATION_DATA[d]?.[c]?.[f]?.[com]) {
-            school.disabled = false;
-            LOCATION_DATA[d][c][f][com].forEach(sch => appendOpt(school, sch));
-            updateCount('school_name', LOCATION_DATA[d][c][f][com].length);
-        }
-    });
-}
-
-function appendOpt(sel, val) {
-    const o = document.createElement('option');
-    o.value = val; o.textContent = val; sel.appendChild(o);
-}
-
-function resetSelect(el, placeholder) {
-    if (!el) return;
-    el.innerHTML = '<option value="">' + placeholder + '</option>';
-    el.disabled = true;
-}
-
-function updateCount(id, count) {
-    const el = document.getElementById('count_' + id);
-    if (el) el.textContent = count + ' options';
-}
-
-function clearCount(id) {
-    const el = document.getElementById('count_' + id);
-    if (el) el.textContent = '';
-}
-
-// ============================================
-// SCHOOL SUBMISSION CHECK
-// ============================================
-// ── Duplicate check state ────────────────────────────────────
-// Tracks the async online check result for the currently selected school
-const _dupCheck = {
-    key:       null,   // key being checked
-    pending:   false,  // GAS request in flight
-    duplicate: false,  // result: is it a duplicate?
-    source:    null    // 'local' | 'online'
-};
-
-// ── Check GAS for duplicate (online) ────────────────────────
-async function checkDuplicateOnline(key) {
-    if (!key || !state.isOnline) return false;
-    try {
-        const parts = key.split('|'); // district|chiefdom|facility|community|school
-        const params = new URLSearchParams({
-            action:    'checkDuplicate',
-            district:  parts[0] || '',
-            chiefdom:  parts[1] || '',
-            facility:  parts[2] || '',
-            community: parts[3] || '',
-            school:    parts[4] || ''
+    window.clearAnalysisFilters=function(){
+        ['af_chiefdom','af_facility','af_community','af_school'].forEach(id=>{
+            const el=document.getElementById(id);
+            if(el){el.innerHTML='<option value="">All</option>';el.disabled=true;}
         });
-        const res = await Promise.race([
-            fetch(CONFIG.SCRIPT_URL + '?' + params.toString()),
-            new Promise((_,rej) => setTimeout(() => rej(new Error('timeout')), 5000))
-        ]);
-        if (!res.ok) return false;
-        const data = await res.json();
-        return !!data.exists;
-    } catch(e) {
-        console.warn('[DupCheck] Online check failed:', e.message);
-        return false; // fail open — don't block if GAS unreachable
-    }
-}
+        const dd=document.getElementById('af_district');if(dd)dd.value='';
+        runAnalysis();
+    };
 
-// ── Central duplicate check (local first, then online) ───────
-async function isDuplicateSubmission(key) {
-    if (!key) return { duplicate: false, source: null };
-
-    // 1. Check localStorage / session
-    if (isSchoolSubmitted(key)) {
-        return { duplicate: true, source: 'local' };
+    function initDistrictFilter(){
+        const dd=document.getElementById('af_district');if(!dd)return;
+        const loc=getLoc();
+        const districts=Object.keys(loc).sort();
+        // Always rebuild — loc may not have been available last call
+        dd.innerHTML='<option value="">All Districts</option>';
+        districts.forEach(d=>{const o=document.createElement('option');o.value=o.textContent=d;dd.appendChild(o);});
+        if(districts.length===0) console.warn('[Analysis] District filter empty — ALL_LOCATION_DATA keys:',Object.keys(window.ALL_LOCATION_DATA||{}));
     }
 
-    // 2. Check pending (offline queue)
-    const inPending = state.pendingSubmissions.some(r => {
-        return makeSchoolKey(r.district, r.chiefdom,
-                             r.facility, r.community, r.school_name) === key;
+    function getFilteredData(allRows){
+        let rows=[...allRows];
+        const fD  =document.getElementById('af_district' )?.value||'';
+        const fC  =document.getElementById('af_chiefdom' )?.value||'';
+        const fF  =document.getElementById('af_facility' )?.value||'';
+        const fCom=document.getElementById('af_community')?.value||'';
+        const fSch=document.getElementById('af_school'   )?.value||'';
+        const lc=s=>(s||'').toLowerCase();
+        if(fD)   rows=rows.filter(r=>lc(r.district ||'')===lc(fD));
+        if(fC)   rows=rows.filter(r=>lc(r.chiefdom ||'')===lc(fC));
+        if(fF)   rows=rows.filter(r=>lc(r.facility ||'')===lc(fF));
+        if(fCom) rows=rows.filter(r=>lc(r.community||'')===lc(fCom));
+        if(fSch) rows=rows.filter(r=>lc(r.school_name||'')===lc(fSch));
+        return rows;
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  CHART INSTANCES
+    // ════════════════════════════════════════════════════════
+    let anCharts={};
+    function destroyCharts(){Object.values(anCharts).forEach(c=>{try{c.destroy();}catch(e){}});anCharts={};}
+
+    const CF={font:{family:"'Oswald',sans-serif"}};
+    const chartOpts=(extra={})=>({
+        responsive:true,maintainAspectRatio:true,
+        plugins:{legend:{labels:{font:{family:"'Oswald',sans-serif",size:11},boxWidth:12}},tooltip:{titleFont:{family:"'Oswald',sans-serif"},bodyFont:{family:"'Oswald',sans-serif"}},...extra},
+        ...extra
     });
-    if (inPending) return { duplicate: true, source: 'pending' };
 
-    // 3. Check already-fetched sheet rows from analysis (if available)
-    if (window._sheetRows && window._sheetRows.length > 0) {
-        const inSheet = window._sheetRows.some(r =>
-            makeSchoolKey(r.district, r.chiefdom,
-                          r.facility, r.community, r.school_name) === key
-        );
-        if (inSheet) return { duplicate: true, source: 'online' };
+    function mkChart(id,cfg){
+        const el=document.getElementById(id);if(!el)return null;
+        const c=new Chart(el,cfg);anCharts[id]=c;return c;
     }
 
-    // 4. Ask GAS directly
-    const onlineDup = await checkDuplicateOnline(key);
-    if (onlineDup) return { duplicate: true, source: 'online' };
+    // ════════════════════════════════════════════════════════
+    //  MAIN ANALYSIS RENDER
+    // ════════════════════════════════════════════════════════
+    window.runAnalysis=function(allRows){
+        if(allRows!==undefined)_sheetRows=allRows||[];
+        destroyCharts();
+        const body=document.getElementById('analysisBody');if(!body)return;
+        const all=getFilteredData(mergeData(_sheetRows));
+        const total=all.length;
 
-    return { duplicate: false, source: null };
-}
+        const sub=document.getElementById('anSubtitle');
+        if(sub)sub.textContent=`${total} school${total!==1?'s':''} submitted · Last refreshed ${new Date().toLocaleTimeString('en-SL',{hour:'2-digit',minute:'2-digit'})}`;
 
-function setupSchoolSubmissionCheck() {
-    const schoolSel = document.getElementById('school_name');
-    if (!schoolSel) return;
-
-    schoolSel.addEventListener('change', async function() {
-        const key = currentSchoolKey();
-
-        // Reset state when school changes
-        _dupCheck.key       = key;
-        _dupCheck.duplicate = false;
-        _dupCheck.source    = null;
-        _dupCheck.pending   = false;
-
-        const banner  = document.getElementById('schoolSubmittedBanner');
-        const nextBtn = document.querySelector('.form-section[data-section="2"] .btn-next');
-
-        if (!key) {
-            if (banner)  banner.style.display = 'none';
-            if (nextBtn) { nextBtn.disabled = false; nextBtn.title = ''; }
+        if(!total){
+            body.innerHTML=`<div class="an-no-data">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>
+              <div style="margin-bottom:12px;">No submissions found. ${_sheetRows.length===0?'Could not load data from ICF-SL Server — try refreshing.':'No data matches the selected filters.'}</div>
+              ${_sheetRows.length===0?`<button onclick="anRefresh()" style="background:#004080;color:#fff;border:none;border-radius:8px;padding:9px 20px;font-family:'Oswald',sans-serif;font-size:12px;font-weight:600;letter-spacing:.5px;cursor:pointer;">↻ RETRY FETCH</button>`:''}
+            </div>`;
             return;
         }
 
-        // Show a subtle checking indicator on the Next button
-        if (nextBtn) {
-            nextBtn.disabled = true;
-            nextBtn.title    = 'Checking for duplicate submission…';
-        }
-        _dupCheck.pending = true;
-
-        const { duplicate, source } = await isDuplicateSubmission(key);
-
-        // Only act if the user hasn't changed school while we were checking
-        if (_dupCheck.key !== key) return;
-
-        _dupCheck.pending   = false;
-        _dupCheck.duplicate = duplicate;
-        _dupCheck.source    = source;
-
-        if (duplicate) {
-            if (!document.getElementById('schoolSubmittedBanner')) injectSubmittedBanner();
-            const b = document.getElementById('schoolSubmittedBanner');
-            if (b) {
-                // Update message based on source
-                const srcLabel = source === 'online'  ? '(confirmed on Google Sheet)' :
-                                 source === 'pending' ? '(in offline queue)'          :
-                                                        '(submitted this session)';
-                const msgEl = b.querySelector('.dup-source-msg');
-                if (msgEl) msgEl.textContent = srcLabel;
-                b.style.display = 'flex';
+        // Targets come from CSV (already computed). Look up the right level
+        // based on active filters: district-only → dKey, +chiefdom → cKey, +phu → pKey
+        const targets    = window._TARGETS || {};
+        const hasTargets = Object.keys(targets).length > 0;
+        const fD = (document.getElementById('af_district')?.value||'').trim().toLowerCase();
+        const fC = (document.getElementById('af_chiefdom')?.value||'').trim().toLowerCase();
+        const fP = (document.getElementById('af_facility')?.value||'').trim().toLowerCase();
+        let targetCount = 0;
+        if (hasTargets) {
+            if (fP && fC && fD) {
+                // PHU level
+                targetCount = targets[fD+'|'+fC+'|'+fP] || 0;
+            } else if (fC && fD) {
+                // Chiefdom level
+                targetCount = targets[fD+'|'+fC] || 0;
+            } else if (fD) {
+                // District level
+                targetCount = targets[fD] || 0;
+            } else {
+                // National total — sum all district-level entries (single-segment keys)
+                Object.entries(targets).forEach(([k, v]) => {
+                    if (!k.includes('|')) targetCount += v;
+                });
             }
-            if (nextBtn) {
-                nextBtn.disabled = true;
-                nextBtn.title    = 'This school has already been submitted — duplicate entry not allowed.';
-            }
-        } else {
-            if (banner)  banner.style.display = 'none';
-            if (nextBtn) { nextBtn.disabled = false; nextBtn.title = ''; }
         }
-    });
-}
 
-function injectSubmittedBanner() {
-    const section2 = document.querySelector('.form-section[data-section="2"]');
-    if (!section2) return;
-    const banner = document.createElement('div');
-    banner.id = 'schoolSubmittedBanner';
-    banner.style.cssText = [
-        'display:none',
-        'background:#fff0f0',
-        'border:2px solid #dc3545',
-        'border-radius:10px',
-        'padding:14px 16px',
-        'margin-bottom:16px',
-        'align-items:flex-start',
-        'gap:12px'
-    ].join(';');
-    banner.innerHTML = `
-      <svg style="width:28px;height:28px;stroke:#dc3545;flex-shrink:0;margin-top:2px" viewBox="0 0 24 24" fill="none" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/>
-      </svg>
-      <div style="flex:1;">
-        <div style="font-size:13px;font-weight:700;color:#c0392b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">
-          ⛔ DUPLICATE — SUBMISSION NOT ALLOWED
-        </div>
-        <div style="font-size:12px;color:#555;line-height:1.6;">
-          This school has <strong>already been submitted</strong> with the same District, Chiefdom, Section, PHU, Community and School Name.
-          <span class="dup-source-msg" style="color:#004080;font-weight:600;"></span>
-          <br>Please choose a <strong>different school</strong> or contact your supervisor.
-          <br><a href="#" onclick="viewSubmittedSchoolFromBanner(); return false;"
-             style="color:#004080;font-weight:600;text-decoration:underline;margin-top:4px;display:inline-block;">
-             View existing submission details →
-          </a>
-        </div>
-      </div>`;
-    const nav = section2.querySelector('.navigation-buttons');
-    if (nav) section2.insertBefore(banner, nav);
-    else section2.appendChild(banner);
-}
+        // Aggregate
+        let tp=0,ti=0,tb=0,tg=0,tbi=0,tgi=0,tr=0,trem=0;
+        const byDist={},bySubmitter={};
+        const cls={b:[0,0,0,0,0],g:[0,0,0,0,0],bi:[0,0,0,0,0],gi:[0,0,0,0,0]};
 
-window.viewSubmittedSchoolFromBanner = function() {
-    const key = currentSchoolKey();
-    if (key) openSchoolDetail(key);
-};
-
-function currentSchoolKey() {
-    try {
-        const district  = document.getElementById('district')?.value    || '';
-        const chiefdom  = document.getElementById('chiefdom')?.value    || '';
-        const facility  = document.getElementById('facility')?.value    || '';
-        const community = document.getElementById('community')?.value   || '';
-        const school    = document.getElementById('school_name')?.value || '';
-        if (!district||!chiefdom||!facility||!community||!school) return null;
-        return [district,chiefdom,facility,community,school]
-            .map(s=>s.trim().toLowerCase()).join('|');
-    } catch (e) { return null; }
-}
-
-function makeSchoolKey(district, chiefdom, facility, community, school) {
-    return [district,chiefdom,facility,community,school]
-        .map(s=>(s||'').toString().trim().toLowerCase()).join('|');
-}
-
-function isSchoolSubmitted(key) {
-    if (!key) return false;
-    return state.submittedSchools.some(s => s.key === key);
-}
-
-function getSubmittedRecord(key) {
-    return state.submittedSchools.find(s => s.key === key) || null;
-}
-
-function getAllAssignedSchools() {
-    const schools = [];
-    const data = ALL_LOCATION_DATA;
-    try {
-        for (const district in data)
-            for (const chiefdom in data[district])
-                for (const facility in data[district][chiefdom])
-                    for (const community in data[district][chiefdom][facility]) {
-                        const schoolList = data[district][chiefdom][facility][community];
-                        if (Array.isArray(schoolList))
-                            schoolList.forEach(school => schools.push({
-                                district, chiefdom, facility, community,
-                                school_name: school,
-                                key: makeSchoolKey(district,chiefdom,facility,community,school)
-                            }));
-                    }
-    } catch (e) { console.error('getAllAssignedSchools:', e); }
-    return schools;
-}
-
-// ============================================
-// SUMMARY MODAL
-// ============================================
-function updateSummaryBadge() {
-    const btn = document.getElementById('viewSummaryBtn');
-    if (!btn) return;
-    const all = getAllAssignedSchools();
-    const submitted = all.filter(s => isSchoolSubmitted(s.key)).length;
-    const remaining = all.length - submitted;
-    let badge = btn.querySelector('.summary-badge');
-    if (!badge) {
-        badge = document.createElement('span');
-        badge.className = 'summary-badge';
-        badge.style.cssText = 'background:#dc3545;color:#fff;border-radius:10px;padding:1px 7px;font-size:10px;font-weight:700;margin-left:4px;';
-        btn.appendChild(badge);
-    }
-    badge.textContent = remaining > 0 ? remaining + ' left' : '✓ Done';
-    badge.style.background = remaining > 0 ? '#dc3545' : '#28a745';
-}
-
-window.openSummaryModal = function() {
-    const modal = document.getElementById('summaryModal');
-    const body  = document.getElementById('summaryModalBody');
-    const all   = getAllAssignedSchools();
-    const total = all.length;
-    const submitted = all.filter(s => isSchoolSubmitted(s.key));
-    const pending   = all.filter(s => !isSchoolSubmitted(s.key));
-    const pct = total > 0 ? Math.round((submitted.length / total) * 100) : 0;
-
-    // Build district summary ONLY from actual submissions — no CSV data
-    const byDist = {};
-    submitted.forEach(s => {
-        const dist = s.district || 'Unknown';
-        if (!byDist[dist]) byDist[dist] = { submitted:0 };
-        byDist[dist].submitted++;
-    });
-
-    let distRows = '';
-    if (Object.keys(byDist).length === 0) {
-        distRows = `<tr><td colspan="2" style="padding:20px;text-align:center;color:#aaa;font-style:italic;">No submissions yet</td></tr>`;
-    } else {
-        Object.entries(byDist).sort().forEach(([d, v]) => {
-            distRows += `<tr>
-              <td style="font-weight:600;text-align:left;padding:10px 15px;">${d}</td>
-              <td style="text-align:center;padding:10px;color:#28a745;font-weight:700;font-size:15px;">${v.submitted}</td>
-            </tr>`;
+        all.forEach(r=>{
+            const vp=+r.total_pupils||0,vi=+r.total_itn||0,vb=+r.total_boys||0,vg=+r.total_girls||0,
+                  vbi=+r.total_boys_itn||0,vgi=+r.total_girls_itn||0,
+                  vr=+r.itns_received||0,vrem=+(r.itns_remaining||r.itns_remaining_val)||0;
+            tp+=vp;ti+=vi;tb+=vb;tg+=vg;tbi+=vbi;tgi+=vgi;tr+=vr;trem+=vrem;
+            const d=r.district||'Unknown';
+            if(!byDist[d])byDist[d]={n:0,p:0,i:0,b:0,g:0,bi:0,gi:0};
+            byDist[d].n++;byDist[d].p+=vp;byDist[d].i+=vi;byDist[d].b+=vb;byDist[d].g+=vg;byDist[d].bi+=vbi;byDist[d].gi+=vgi;
+            const sub=r.submitted_by||'Unknown';
+            if(!bySubmitter[sub])bySubmitter[sub]={n:0,p:0,i:0};
+            bySubmitter[sub].n++;bySubmitter[sub].p+=vp;bySubmitter[sub].i+=vi;
+            for(let c=1;c<=5;c++){
+                cls.b[c-1]+=+r['c'+c+'_boys']||0;cls.g[c-1]+=+r['c'+c+'_girls']||0;
+                cls.bi[c-1]+=+r['c'+c+'_boys_itn']||0;cls.gi[c-1]+=+r['c'+c+'_girls_itn']||0;
+            }
         });
-    }
 
-    // School list — submitted first (green), then pending at bottom (amber)
-    const sortKey = (s) => s.district + '|' + (s.chiefdom||'') + '|' + s.school_name;
-    const sortedSubmitted = submitted.slice().sort((a,b) => sortKey(a).localeCompare(sortKey(b)));
-    const sortedPending   = pending.slice().sort((a,b)   => sortKey(a).localeCompare(sortKey(b)));
+        const ov=tp>0?Math.round((ti/tp)*100):0;
+        const bc=tb>0?Math.round((tbi/tb)*100):0;
+        const gc=tg>0?Math.round((tgi/tg)*100):0;
+        const classLabels=['Class 1','Class 2','Class 3','Class 4','Class 5'];
+        const classTot=cls.b.map((b,i)=>b+cls.g[i]);
+        const classITN=cls.bi.map((b,i)=>b+cls.gi[i]);
+        const classCov=classTot.map((t,i)=>t>0?Math.round((classITN[i]/t)*100):0);
+        const boysCov=cls.b.map((b,i)=>b>0?Math.round((cls.bi[i]/b)*100):0);
+        const girlsCov=cls.g.map((g,i)=>g>0?Math.round((cls.gi[i]/g)*100):0);
+        const distL=Object.keys(byDist).sort();
+        const distCov=distL.map(d=>byDist[d].p>0?Math.round((byDist[d].i/byDist[d].p)*100):0);
+        const distBoysCov=distL.map(d=>byDist[d].b>0?Math.round((byDist[d].bi/byDist[d].b)*100):0);
+        const distGirlsCov=distL.map(d=>byDist[d].g>0?Math.round((byDist[d].gi/byDist[d].g)*100):0);
 
-    let schoolRows = '';
-
-    // ── Submitted rows ──
-    sortedSubmitted.forEach(s => {
-        const rec      = getSubmittedRecord(s.key);
-        const when     = rec ? formatDate(rec.timestamp) : '—';
-        const coverage = rec?.data?.coverage_total ? rec.data.coverage_total+'%' : '—';
-        schoolRows += `
-          <tr style="cursor:pointer;background:#f0fff0;" onclick="openSchoolDetail('${s.key}')">
-            <td style="padding:10px 8px;">
-              <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#28a745;margin-right:8px;flex-shrink:0;"></span>
-              <strong>${s.school_name}</strong>
-            </td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;">${s.district}</td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;">${s.chiefdom||'—'}</td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;">${s.facility||'—'}</td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;">${s.community||'—'}</td>
-            <td style="padding:10px 8px;text-align:center;">
-              <span style="background:#28a745;color:#fff;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:600;letter-spacing:0.5px;">SUBMITTED</span>
-            </td>
-            <td style="padding:10px 8px;text-align:center;font-size:11px;color:#666;">${when}</td>
-            <td style="padding:10px 8px;text-align:center;font-weight:700;color:#28a745;">${coverage}</td>
-            <td style="padding:10px 8px;text-align:center;">
-              <button onclick="event.stopPropagation();openSchoolDetail('${s.key}')" style="background:#004080;color:#fff;border:none;border-radius:4px;padding:5px 13px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Oswald',sans-serif;letter-spacing:0.5px;">VIEW</button>
-            </td>
-          </tr>`;
-    });
-
-    // ── Divider row between submitted and pending ──
-    if (sortedSubmitted.length > 0 && sortedPending.length > 0) {
-        schoolRows += `
-          <tr>
-            <td colspan="9" style="padding:0;">
-              <div style="background:linear-gradient(135deg,#e67e22,#f0a500);color:#fff;padding:9px 16px;font-family:'Oswald',sans-serif;font-size:11px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;display:flex;align-items:center;gap:8px;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" width="13" height="13"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                ${sortedPending.length} SCHOOL${sortedPending.length!==1?'S':''} NOT YET SUBMITTED
-              </div>
-            </td>
-          </tr>`;
-    }
-
-    // ── Pending rows ──
-    sortedPending.forEach(s => {
-        schoolRows += `
-          <tr style="cursor:pointer;background:#fffdf0;" onclick="loadSchoolIntoForm('${s.key}')">
-            <td style="padding:10px 8px;">
-              <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ffc107;margin-right:8px;flex-shrink:0;"></span>
-              <strong style="color:#555;">${s.school_name}</strong>
-            </td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;color:#777;">${s.district}</td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;color:#777;">${s.chiefdom||'—'}</td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;color:#777;">${s.facility||'—'}</td>
-            <td style="padding:10px 8px;text-align:center;font-size:12px;color:#777;">${s.community||'—'}</td>
-            <td style="padding:10px 8px;text-align:center;">
-              <span style="background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:4px;padding:3px 10px;font-size:11px;font-weight:600;letter-spacing:0.5px;">PENDING</span>
-            </td>
-            <td style="padding:10px 8px;text-align:center;font-size:11px;color:#aaa;">—</td>
-            <td style="padding:10px 8px;text-align:center;color:#aaa;">—</td>
-            <td style="padding:10px 8px;text-align:center;">
-              <button onclick="event.stopPropagation();loadSchoolIntoForm('${s.key}')" style="background:#e67e22;color:#fff;border:none;border-radius:4px;padding:5px 13px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Oswald',sans-serif;letter-spacing:0.5px;">START</button>
-            </td>
-          </tr>`;
-    });
-
-    if (!schoolRows) {
-        schoolRows = `<tr><td colspan="9" style="padding:32px;text-align:center;color:#aaa;font-style:italic;">No schools loaded — ensure cascading_data1.csv is present.</td></tr>`;
-    }
-
-    body.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:25px;">
-        <div style="background:#e8f1fa;border:2px solid #004080;border-radius:10px;padding:16px 10px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#004080;">${total}</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Target Schools</div>
+        // ── Build HTML ──────────────────────────────────
+        body.innerHTML=`
+        <!-- KPIs -->
+        <div class="an-kpi-row">
+          ${hasTargets && targetCount>0 ? `<div class="an-kpi b"><div class="an-kpi-val">${targetCount}</div><div class="an-kpi-lbl">Target Schools</div></div>` : ''}
+          <div class="an-kpi b"><div class="an-kpi-val">${total}</div><div class="an-kpi-lbl">Submitted</div></div>
+          ${hasTargets && targetCount>0 ? `<div class="an-kpi ${targetCount>total?'r':'g'}"><div class="an-kpi-val">${Math.max(0,targetCount-total)}</div><div class="an-kpi-lbl">Remaining</div></div>
+          <div class="an-kpi ${Math.round((total/targetCount)*100)>=80?'g':'o'}"><div class="an-kpi-val">${Math.round((total/targetCount)*100)}%</div><div class="an-kpi-lbl">Progress</div></div>` : ''}
+          <div class="an-kpi"><div class="an-kpi-val">${tp.toLocaleString()}</div><div class="an-kpi-lbl">Total Pupils</div></div>
+          <div class="an-kpi o"><div class="an-kpi-val">${tr.toLocaleString()}</div><div class="an-kpi-lbl">ITNs Received</div></div>
+          <div class="an-kpi g"><div class="an-kpi-val">${ti.toLocaleString()}</div><div class="an-kpi-lbl">Distributed</div></div>
+          <div class="an-kpi ${trem<0?'r':''}"><div class="an-kpi-val">${trem.toLocaleString()}</div><div class="an-kpi-lbl">Remaining</div></div>
+          <div class="an-kpi ${ov>=80?'g':ov>=50?'o':'r'}"><div class="an-kpi-val">${ov}%</div><div class="an-kpi-lbl">Coverage</div></div>
+          <div class="an-kpi b"><div class="an-kpi-val">${bc}%</div><div class="an-kpi-lbl">Boys Cov.</div></div>
+          <div class="an-kpi p"><div class="an-kpi-val">${gc}%</div><div class="an-kpi-lbl">Girls Cov.</div></div>
         </div>
-        <div style="background:#e8f5e9;border:2px solid #28a745;border-radius:10px;padding:16px 10px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#28a745;">${submitted.length}</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Submitted</div>
+
+        <!-- Row 1: Coverage donut + Gender enrollment + Gender ITN -->
+        <div class="an-section">
+          <div class="an-section-hdr"><svg viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>OVERALL SUMMARY</div>
+          <div class="an-section-body">
+            <div class="an-charts-3">
+              <div class="an-chart-card"><div class="an-chart-label">ITN Coverage</div><canvas id="anCovDonut"></canvas></div>
+              <div class="an-chart-card"><div class="an-chart-label">Enrollment by Gender</div><canvas id="anEnrollDonut"></canvas></div>
+              <div class="an-chart-card"><div class="an-chart-label">ITNs Distributed by Gender</div><canvas id="anItnDonut"></canvas></div>
+            </div>
+          </div>
         </div>
-        <div style="background:#fff8e1;border:2px solid #ffc107;border-radius:10px;padding:16px 10px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:#e67e22;">${pending.length}</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Pending</div>
+
+        <!-- Row 2: Coverage by class -->
+        <div class="an-section">
+          <div class="an-section-hdr"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg>CLASS-BY-CLASS BREAKDOWN</div>
+          <div class="an-section-body">
+            <div class="an-charts-2">
+              <div class="an-chart-card"><div class="an-chart-label">Coverage % by Class</div><canvas id="anClassCov"></canvas></div>
+              <div class="an-chart-card"><div class="an-chart-label">Boys vs Girls Coverage by Class</div><canvas id="anClassGender"></canvas></div>
+            </div>
+            <div style="margin-top:12px;" class="an-chart-card"><div class="an-chart-label">Enrollment vs ITNs Distributed by Class</div><canvas id="anEnrollVsItn"></canvas></div>
+          </div>
         </div>
-        <div style="background:${pct>=80?'#e8f5e9':pct>=50?'#fff8e1':'#fdecea'};border:2px solid ${pct>=80?'#28a745':pct>=50?'#ffc107':'#dc3545'};border-radius:10px;padding:16px 10px;text-align:center;">
-          <div style="font-size:32px;font-weight:700;color:${pct>=80?'#28a745':pct>=50?'#e67e22':'#dc3545'};">${pct}%</div>
-          <div style="font-size:11px;color:#555;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;">Progress</div>
-        </div>
-      </div>
-      <div style="margin-bottom:25px;">
-        <div style="background:#004080;color:#fff;padding:12px 20px;border-radius:8px 8px 0 0;font-size:14px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;text-align:center;">Submissions by District</div>
-        <div style="overflow-x:auto;border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;">
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:#f8f9fa;">
-              <th style="padding:12px 15px;text-align:left;border-bottom:1px solid #dee2e6;">District</th>
-              <th style="padding:12px;text-align:center;border-bottom:1px solid #dee2e6;">Submitted</th>
-            </tr></thead>
-            <tbody>${distRows}</tbody>
-          </table>
-        </div>
-      </div>
-      <div>
-        <div style="background:#004080;color:#fff;padding:12px 20px;border-radius:8px 8px 0 0;font-size:14px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;">
-          <span>All Schools — ${submitted.length} Submitted · ${pending.length} Pending</span>
-          <span style="font-size:12px;font-weight:400;opacity:.8;">Click any row to view details</span>
-        </div>
-        <div style="overflow-x:auto;border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;">
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr style="background:linear-gradient(135deg,#004080,#1a6abf);">
-              <th style="padding:11px 12px;text-align:left;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">School</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">District</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">Chiefdom</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">PHU</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">Community</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">Status</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">Submitted</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">Coverage</th>
-              <th style="padding:11px 10px;text-align:center;border-bottom:2px solid #dee2e6;color:#fff;font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:.5px;text-transform:uppercase;">Action</th>
-            </tr></thead>
-            <tbody>${schoolRows}</tbody>
-          </table>
-        </div>
-      </div>`;
 
-    if (modal) modal.classList.add('show');
-};
+        <!-- Row 3: By district (only if >1) -->
+        ${distL.length>1?`
+        <div class="an-section">
+          <div class="an-section-hdr"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>BY DISTRICT</div>
+          <div class="an-section-body">
+            <div class="an-charts-2">
+              <div class="an-chart-card"><div class="an-chart-label">Coverage % by District</div><canvas id="anDistCov"></canvas></div>
+              <div class="an-chart-card"><div class="an-chart-label">Boys vs Girls Coverage by District</div><canvas id="anDistGender"></canvas></div>
+            </div>
+          </div>
+        </div>`:''}
 
-window.closeSummaryModal = function() {
-    const modal = document.getElementById('summaryModal');
-    if (modal) modal.classList.remove('show');
-};
+        <!-- Row 4: By submitter -->
+        ${Object.keys(bySubmitter).length>1?`
+        <div class="an-section">
+          <div class="an-section-hdr"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>BY DISTRIBUTOR</div>
+          <div class="an-section-body">
+            <div class="an-chart-card"><div class="an-chart-label">Schools Submitted per Distributor</div><canvas id="anSubmitterBar"></canvas></div>
+          </div>
+        </div>`:''}
 
-window.viewSummary = function() { openSummaryModal(); };
-
-// ============================================
-// SCHOOL DETAIL MODAL
-// ============================================
-window.openSchoolDetail = function(key) {
-    const rec = getSubmittedRecord(key);
-    if (!rec) {
-        const school = getAllAssignedSchools().find(s => s.key === key);
-        if (school && confirm('This school has not been submitted yet. Load it into the form now?'))
-            loadSchoolIntoForm(key);
-        return;
-    }
-    const d = rec.data;
-    const modal = document.getElementById('schoolDetailModal');
-    const title = document.getElementById('schoolDetailTitle');
-    const body  = document.getElementById('schoolDetailBody');
-    if (!modal || !title || !body) return;
-
-    title.textContent = (d.school_name || 'School') + ' — Submission Detail';
-
-    let classRows = '';
-    for (let c = 1; c <= 5; c++) {
-        const boys=parseInt(d['c'+c+'_boys'])||0, girls=parseInt(d['c'+c+'_girls'])||0,
-              boysITN=parseInt(d['c'+c+'_boys_itn'])||0, girlsITN=parseInt(d['c'+c+'_girls_itn'])||0;
-        const total=boys+girls, itn=boysITN+girlsITN;
-        const cov=total>0?Math.round((itn/total)*100):0;
-        classRows += `<tr>
-          <td style="font-weight:600;text-align:left;padding:8px 12px;">Class ${c}</td>
-          <td style="text-align:center;padding:8px;">${boys}</td><td style="text-align:center;padding:8px;">${boysITN}</td>
-          <td style="text-align:center;padding:8px;">${girls}</td><td style="text-align:center;padding:8px;">${girlsITN}</td>
-          <td style="text-align:center;padding:8px;font-weight:700;">${total}</td>
-          <td style="text-align:center;padding:8px;font-weight:700;">${itn}</td>
-          <td style="text-align:center;padding:8px;font-weight:700;color:${cov>=80?'#28a745':cov>=50?'#e6a800':'#dc3545'};">${cov}%</td>
-        </tr>`;
-    }
-
-    const totBoys=parseInt(d.total_boys)||0, totGirls=parseInt(d.total_girls)||0,
-          totPupils=parseInt(d.total_pupils)||0, totBoysITN=parseInt(d.total_boys_itn)||0,
-          totGirlsITN=parseInt(d.total_girls_itn)||0, totITN=parseInt(d.total_itn)||0,
-          coverage=parseInt(d.coverage_total)||0, covBoys=parseInt(d.coverage_boys)||0,
-          covGirls=parseInt(d.coverage_girls)||0, remaining=parseInt(d.itns_remaining)||0;
-
-    const itnTypes = [d.itn_type_pbo==='Yes'?'PBO':'', d.itn_type_ig2==='Yes'?'IG2':'']
-        .filter(Boolean).join(', ') || '—';
-
-    body.innerHTML = `
-      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:25px;">
-        ${infoCard('District',d.district||'—')}${infoCard('Chiefdom',d.chiefdom||'—')}
-        ${infoCard('Health Facility (PHU)',d.facility||'—')}
-        ${infoCard('Community',d.community||'—')}${infoCard('School',d.school_name||'—')}
-        ${infoCard('Head Teacher',d.head_teacher||'—')}${infoCard('HT Phone',d.head_teacher_phone||'—')}
-        ${infoCard('Distribution Date',d.distribution_date||'—')}${infoCard('Survey Date',d.survey_date||'—')}
-        ${infoCard('Submitted At',formatDate(rec.timestamp))}${infoCard('Submitted By',d.submitted_by||'—')}
-        ${infoCard('ITN Type(s)',itnTypes)}${infoCard('ITNs Received',d.itns_received||'—')}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:25px;">
-        ${statCard('Total Pupils',totPupils,'#004080')}
-        ${statCard('ITNs Distributed',totITN,'#28a745')}
-        ${statCard('ITNs Remaining',remaining,remaining<0?'#dc3545':'#fd7e14')}
-        ${statCard('Coverage',coverage+'%',coverage>=80?'#28a745':coverage>=50?'#e6a800':'#dc3545')}
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:25px;">
-        ${statCard('Boys Enrolled',totBoys,'#004080')}${statCard('Boys ITN Coverage',covBoys+'%','#004080')}${statCard('Boys Received ITN',totBoysITN,'#004080')}
-        ${statCard('Girls Enrolled',totGirls,'#e91e8c')}${statCard('Girls ITN Coverage',covGirls+'%','#e91e8c')}${statCard('Girls Received ITN',totGirlsITN,'#e91e8c')}
-      </div>
-      <div style="background:#004080;color:#fff;padding:12px 20px;border-radius:8px 8px 0 0;font-size:14px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;text-align:center;">Class-by-Class Breakdown</div>
-      <div style="overflow-x:auto;border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;margin-bottom:25px;">
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-          <thead><tr style="background:#f8f9fa;">
-            <th style="padding:10px 12px;text-align:left;border-bottom:1px solid #dee2e6;">Class</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">Boys</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">Boys ITN</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">Girls</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">Girls ITN</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">Total</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">ITN</th>
-            <th style="padding:10px;text-align:center;border-bottom:1px solid #dee2e6;">Coverage</th>
-          </tr></thead>
-          <tbody>
-            ${classRows}
-            <tr style="background:#e8f1fa;font-weight:700;">
-              <td style="padding:10px 12px;">TOTAL</td>
-              <td style="text-align:center;padding:10px;">${totBoys}</td><td style="text-align:center;padding:10px;">${totBoysITN}</td>
-              <td style="text-align:center;padding:10px;">${totGirls}</td><td style="text-align:center;padding:10px;">${totGirlsITN}</td>
-              <td style="text-align:center;padding:10px;">${totPupils}</td><td style="text-align:center;padding:10px;">${totITN}</td>
-              <td style="text-align:center;padding:10px;color:${coverage>=80?'#28a745':coverage>=50?'#e6a800':'#dc3545'};font-size:15px;">${coverage}%</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      ${buildTeamSection(d)}
-      ${d.gps_lat ? `
-      <div style="background:#e8f1fa;border:2px solid #004080;border-radius:8px;padding:15px 20px;font-size:13px;text-align:center;">
-        <strong style="color:#004080;display:block;margin-bottom:5px;">GPS COORDINATES</strong>
-        <div style="font-family:monospace;font-size:14px;">${d.gps_lat}, ${d.gps_lng}</div>
-        ${d.gps_acc?'<div style="color:#666;margin-top:5px;font-size:11px;">Accuracy: ±'+d.gps_acc+'m</div>':''}
-      </div>` : ''}`;
-
-    closeSummaryModal();
-    if (modal) modal.classList.add('show');
-};
-
-function infoCard(label, value) {
-    return `<div style="background:#f8f9fa;border:1px solid #dee2e6;border-radius:7px;padding:12px 15px;text-align:center;">
-      <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;">${label}</div>
-      <div style="font-size:14px;font-weight:600;color:#333;">${value}</div>
-    </div>`;
-}
-
-function statCard(label, value, color) {
-    return `<div style="background:#fff;border:2px solid ${color}20;border-radius:10px;padding:15px 10px;text-align:center;">
-      <div style="font-size:28px;font-weight:700;color:${color};line-height:1.2;">${value}</div>
-      <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.5px;margin-top:5px;">${label}</div>
-    </div>`;
-}
-
-function buildTeamSection(d) {
-    let html = '<div style="margin-bottom:20px;"><div style="background:#004080;color:#fff;padding:12px 20px;border-radius:8px 8px 0 0;font-size:14px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;text-align:center;">Team Members</div>';
-    html += '<div style="border:2px solid #dee2e6;border-top:none;border-radius:0 0 8px 8px;padding:20px;display:grid;grid-template-columns:repeat(3,1fr);gap:15px;">';
-    for (let i = 1; i <= 3; i++) {
-        const name = d['team'+i+'_name']||'', phone = d['team'+i+'_phone']||'';
-        if (name) html += `<div style="background:#f8f9fa;border-radius:8px;padding:15px;text-align:center;">
-          <div style="font-size:11px;color:#004080;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Member ${i}</div>
-          <div style="font-size:14px;font-weight:600;">${name}</div>
-          ${phone?`<div style="font-size:12px;color:#666;margin-top:4px;">${phone}</div>`:''}
+        <!-- School table -->
+        <div class="an-section">
+          <div class="an-section-hdr"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M3 3h18v18H3zM3 9h18M9 21V9"/></svg>ALL SCHOOLS (${total})</div>
+          <div class="an-section-body" style="padding:0;">
+            <div class="an-tbl-wrap">
+              <table class="an-tbl">
+                <thead><tr><th>#</th><th>School</th><th>Community</th><th>District</th><th>Pupils</th><th>Boys</th><th>Girls</th><th>ITNs</th><th>Remaining</th><th>Coverage</th><th>Date</th><th>By</th></tr></thead>
+                <tbody>
+                  ${all.sort((a,b)=>(a.district||'').localeCompare(b.district||'')).map((r,i)=>{
+                    const vp=+r.total_pupils||0,vi=+r.total_itn||0,vb=+r.total_boys||0,vg=+r.total_girls||0;
+                    const vrem=+(r.itns_remaining||r.itns_remaining_val)||0;
+                    const cov=vp>0?Math.round((vi/vp)*100):0;
+                    const col=covColor(cov);
+                    return`<tr>
+                      <td style="color:#8090a0;font-size:11px;">${i+1}</td>
+                      <td style="font-weight:600;white-space:nowrap;">${r.school_name||'—'}</td>
+                      <td style="white-space:nowrap;">${r.community||'—'}</td>
+                      <td style="white-space:nowrap;">${r.district||'—'}</td>
+                      <td style="text-align:center;">${vp}</td>
+                      <td style="text-align:center;color:#004080;">${vb}</td>
+                      <td style="text-align:center;color:#e91e8c;">${vg}</td>
+                      <td style="text-align:center;font-weight:600;">${vi}</td>
+                      <td style="text-align:center;color:${vrem<0?'#dc3545':'#607080'};">${vrem}</td>
+                      <td>
+                        <div class="an-cov-cell">
+                          <div class="an-cov-bar"><div class="an-cov-fill" style="width:${Math.min(100,cov)}%;background:${col};"></div></div>
+                          ${covBadge(cov)}
+                        </div>
+                      </td>
+                      <td style="font-size:11px;white-space:nowrap;">${r.distribution_date||'—'}</td>
+                      <td style="font-size:11px;color:#607080;white-space:nowrap;">${r.submitted_by||'—'}</td>
+                    </tr>`;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>`;
-    }
-    html += '</div></div>';
-    return html;
-}
 
-window.closeSchoolDetailModal = function() {
-    const modal = document.getElementById('schoolDetailModal');
-    if (modal) modal.classList.remove('show');
-};
+        // ── Charts ──────────────────────────────────────
+        // 1. Coverage donut
+        mkChart('anCovDonut',{type:'doughnut',data:{labels:['Covered','Remaining'],datasets:[{data:[ov,100-ov],backgroundColor:[covColor(ov),'#e8edf2'],borderWidth:3,borderColor:'#fff'}]},options:{...chartOpts(),cutout:'72%',plugins:{legend:{position:'bottom',labels:{font:{family:"'Oswald',sans-serif",size:11},boxWidth:12}},title:{display:true,text:ov+'%',color:covColor(ov),font:{family:"'Oswald',sans-serif",size:22,weight:'700'}}}}});
 
-// ============================================
-// LOAD SCHOOL INTO FORM
-// ============================================
-window.loadSchoolIntoForm = function(key) {
-    const school = getAllAssignedSchools().find(s => s.key === key);
-    if (!school) return;
-    closeSummaryModal();
-    document.querySelectorAll('.form-section').forEach(s => s.classList.remove('active'));
-    state.currentSection = 2;
-    const section2 = document.querySelector('.form-section[data-section="2"]');
-    if (section2) section2.classList.add('active');
-    updateProgress();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+        // 2. Gender enrollment donut
+        mkChart('anEnrollDonut',{type:'doughnut',data:{labels:['Boys','Girls'],datasets:[{data:[tb,tg],backgroundColor:['#004080','#e91e8c'],borderWidth:3,borderColor:'#fff'}]},options:{...chartOpts(),cutout:'60%',plugins:{legend:{position:'bottom',labels:{font:{family:"'Oswald',sans-serif",size:11},boxWidth:12}}}}});
 
-    const chain = [
-        ['district',    school.district],
-        ['chiefdom',    school.chiefdom],
-        ['facility',    school.facility],
-        ['community',   school.community],
-        ['school_name', school.school_name]
-    ];
-    let delay = 0;
-    chain.forEach(([id, val]) => {
-        setTimeout(() => {
-            const el = document.getElementById(id);
-            if (el) { el.value = val; el.dispatchEvent(new Event('change')); }
-        }, delay);
-        delay += 100;
-    });
-    showNotification('Loaded: ' + school.school_name, 'info');
-};
+        // 3. Gender ITN donut
+        mkChart('anItnDonut',{type:'doughnut',data:{labels:['Boys','Girls'],datasets:[{data:[tbi,tgi],backgroundColor:['#004080','#e91e8c'],borderWidth:3,borderColor:'#fff'}]},options:{...chartOpts(),cutout:'60%',plugins:{legend:{position:'bottom',labels:{font:{family:"'Oswald',sans-serif",size:11},boxWidth:12}}}}});
 
-// ============================================
-// NAVIGATION
-// ============================================
-window.nextSection = function() {
-    if (state.currentSection === 1) { moveToNextSection(); return; }
-    if (validateCurrentSection()) moveToNextSection();
-};
+        // 4. Coverage by class
+        mkChart('anClassCov',{type:'bar',data:{labels:classLabels,datasets:[{label:'Coverage %',data:classCov,backgroundColor:classCov.map(v=>covColor(v)+'cc'),borderColor:classCov.map(covColor),borderWidth:2,borderRadius:6}]},options:{...chartOpts({scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',font:CF.font},grid:{color:'rgba(0,0,0,.05)'}},x:{ticks:{font:CF.font},grid:{display:false}}},plugins:{legend:{display:false},annotation:{}}})}});
 
-window.previousSection = function() {
-    if (state.currentSection > 1) {
-        document.querySelector('.form-section[data-section="'+state.currentSection+'"]')?.classList.remove('active');
-        state.currentSection--;
-        document.querySelector('.form-section[data-section="'+state.currentSection+'"]')?.classList.add('active');
-        updateProgress();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-};
+        // 5. Boys vs Girls coverage by class grouped
+        mkChart('anClassGender',{type:'bar',data:{labels:classLabels,datasets:[{label:'Boys',data:boysCov,backgroundColor:'rgba(0,64,128,.75)',borderColor:'#004080',borderWidth:2,borderRadius:5},{label:'Girls',data:girlsCov,backgroundColor:'rgba(233,30,140,.7)',borderColor:'#e91e8c',borderWidth:2,borderRadius:5}]},options:{...chartOpts({scales:{y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',font:CF.font},grid:{color:'rgba(0,0,0,.05)'}},x:{ticks:{font:CF.font},grid:{display:false}}}})}});
 
-function moveToNextSection() {
-    if (state.currentSection < state.totalSections) {
-        document.querySelector('.form-section[data-section="'+state.currentSection+'"]')?.classList.remove('active');
-        state.currentSection++;
-        document.querySelector('.form-section[data-section="'+state.currentSection+'"]')?.classList.add('active');
-        updateProgress();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-        if (state.currentSection === 4) calculateAll();
-    }
-}
+        // 6. Enrollment vs ITN by class
+        mkChart('anEnrollVsItn',{type:'bar',data:{labels:classLabels,datasets:[{label:'Enrolled',data:classTot,backgroundColor:'rgba(0,64,128,.2)',borderColor:'#004080',borderWidth:2,borderRadius:5},{label:'Received ITN',data:classITN,backgroundColor:'rgba(40,167,69,.7)',borderColor:'#28a745',borderWidth:2,borderRadius:5}]},options:{...chartOpts({scales:{y:{beginAtZero:true,ticks:{font:CF.font},grid:{color:'rgba(0,0,0,.05)'}},x:{ticks:{font:CF.font},grid:{display:false}}}})}});
 
-function validateCurrentSection() {
-    const section = document.querySelector('.form-section[data-section="'+state.currentSection+'"]');
-    if (!section) return true;
-    if (state.currentSection === 1) return true;
+        // 7. Coverage by district (horizontal)
+        if(distL.length>1){
+            mkChart('anDistCov',{type:'bar',data:{labels:distL,datasets:[{label:'Coverage %',data:distCov,backgroundColor:distCov.map(v=>covColor(v)+'cc'),borderColor:distCov.map(covColor),borderWidth:2,borderRadius:5}]},options:{...chartOpts({indexAxis:'y',scales:{x:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',font:CF.font},grid:{color:'rgba(0,0,0,.05)'}},y:{ticks:{font:CF.font},grid:{display:false}}},plugins:{legend:{display:false}}})}});
 
-    if (state.currentSection === 2) {
-        const key = currentSchoolKey();
-        // Use cached result from async check — or re-check local synchronously
-        if (key && (_dupCheck.duplicate || isSchoolSubmitted(key))) {
-            const src = _dupCheck.source === 'online' ? ' (confirmed on Google Sheet)' :
-                        _dupCheck.source === 'pending' ? ' (in offline queue)' :
-                        ' (submitted this session)';
-            showNotification('⛔ Duplicate entry blocked — this school has already been submitted' + src + '.', 'error');
-            return false;
+            // 8. Boys vs Girls by district
+            mkChart('anDistGender',{type:'bar',data:{labels:distL,datasets:[{label:'Boys',data:distBoysCov,backgroundColor:'rgba(0,64,128,.75)',borderColor:'#004080',borderWidth:2,borderRadius:4},{label:'Girls',data:distGirlsCov,backgroundColor:'rgba(233,30,140,.7)',borderColor:'#e91e8c',borderWidth:2,borderRadius:4}]},options:{...chartOpts({indexAxis:'y',scales:{x:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',font:CF.font},grid:{color:'rgba(0,0,0,.05)'}},y:{ticks:{font:CF.font},grid:{display:false}}}})}});
         }
+
+        // 9. By submitter bar
+        if(Object.keys(bySubmitter).length>1){
+            const subs=Object.entries(bySubmitter).sort((a,b)=>b[1].n-a[1].n).slice(0,10);
+            const subLabels=subs.map(s=>s[0]),subVals=subs.map(s=>s[1].n),subCov=subs.map(s=>s[1].p>0?Math.round((s[1].i/s[1].p)*100):0);
+            mkChart('anSubmitterBar',{type:'bar',data:{labels:subLabels,datasets:[{label:'Schools',data:subVals,backgroundColor:'rgba(0,64,128,.7)',borderColor:'#004080',borderWidth:2,borderRadius:5,yAxisID:'y'},{label:'Coverage %',data:subCov,backgroundColor:'rgba(40,167,69,.6)',borderColor:'#28a745',borderWidth:2,borderRadius:5,type:'line',yAxisID:'y1'}]},options:{...chartOpts({scales:{y:{beginAtZero:true,ticks:{font:CF.font},grid:{color:'rgba(0,0,0,.05)'},title:{display:true,text:'Schools',font:CF.font}},y1:{beginAtZero:true,max:100,position:'right',ticks:{callback:v=>v+'%',font:CF.font},grid:{display:false},title:{display:true,text:'Coverage',font:CF.font}},x:{ticks:{font:CF.font},grid:{display:false}}}})}});
+        }
+    };
+
+    // ════════════════════════════════════════════════════════
+    //  TAB SWITCHER
+    // ════════════════════════════════════════════════════════
+    window.switchAnTab = function(tab) {
+        const tabs = ['analysis', 'targets'];
+        tabs.forEach(t => {
+            const btn = document.getElementById('anTab-' + t);
+            const panel = document.getElementById(t === 'analysis' ? 'analysisBody' : 'targetsBody');
+            const isActive = t === tab;
+            if (btn) {
+                btn.style.color       = isActive ? '#004080' : '#607080';
+                btn.style.borderBottomColor = isActive ? '#c8991a' : 'transparent';
+                btn.style.background  = isActive ? '#f4f8ff' : 'none';
+            }
+            if (panel) panel.style.display = isActive ? 'block' : 'none';
+        });
+        if (tab === 'targets') renderTargetsTab();
+    };
+
+    // ════════════════════════════════════════════════════════
+    //  TARGETS TAB — District → Chiefdom → Schools breakdown
+    // ════════════════════════════════════════════════════════
+    // Build targets tree — each entry in ALL_LOCATION_DATA arrays is already unique
+    function buildTargetsTree() {
+        const data = window.ALL_LOCATION_DATA || {};
+        const tree = {};
+
+        for (const district in data) {
+            if (!tree[district]) tree[district] = { chiefdoms: {} };
+            const dk = district.trim().toLowerCase();
+            for (const chiefdom in data[district]) {
+                if (!tree[district].chiefdoms[chiefdom])
+                    tree[district].chiefdoms[chiefdom] = { schools: [] };
+                const ck = chiefdom.trim().toLowerCase();
+                for (const phu in data[district][chiefdom]) {
+                    const pk = phu.trim().toLowerCase();
+                    for (const community in data[district][chiefdom][phu]) {
+                        const comk = community.trim().toLowerCase();
+                        const schoolList = data[district][chiefdom][phu][community];
+                        if (!Array.isArray(schoolList)) continue;
+                        schoolList.forEach(s => {
+                            if (!s) return;
+                            tree[district].chiefdoms[chiefdom].schools.push({
+                                district, chiefdom, phu, community, name: s,
+                                key: dk+'|'+ck+'|'+pk+'|'+comk+'|'+s.trim().toLowerCase()
+                            });
+                        });
+                    }
+                }
+                tree[district].chiefdoms[chiefdom].schools.sort((a,b) => a.name.localeCompare(b.name));
+            }
+        }
+        return tree;
     }
 
-    let isValid = true, firstInvalid = null;
-    section.querySelectorAll('input[required], select[required]').forEach(field => {
-        if (field.type === 'hidden') return;
-        if (field.disabled) return;   // skip disabled fields (e.g. section_loc)
-        if (!field.value || field.value.trim() === '') {
-            isValid = false; field.classList.add('error');
-            document.getElementById('error_'+field.id)?.classList.add('show');
-            if (!firstInvalid) firstInvalid = field;
-        } else {
-            field.classList.remove('error');
-            document.getElementById('error_'+field.id)?.classList.remove('show');
-        }
-    });
+    function getSubmittedSet() {
+        // Returns Set of lowercase district|chiefdom|phu|community|school keys from ICF-SL Server only
+        return new Set(
+            (_sheetRows || [])
+                .filter(r => r.school_name)
+                .map(r =>
+                    (r.district    ||'').trim().toLowerCase()+'|'+
+                    (r.chiefdom    ||'').trim().toLowerCase()+'|'+
+                    (r.facility    ||'').trim().toLowerCase()+'|'+
+                    (r.community   ||'').trim().toLowerCase()+'|'+
+                    (r.school_name ||'').trim().toLowerCase()
+                )
+        );
+    }
 
-    if (state.currentSection === 3) {
-        const pbo = document.getElementById('itn_type_pbo')?.checked||false;
-        const ig2 = document.getElementById('itn_type_ig2')?.checked||false;
-        if (!pbo && !ig2) {
-            isValid = false;
-            document.getElementById('error_itn_type')?.classList.add('show');
-            showNotification('Please select at least one ITN type.', 'error');
-        } else {
-            document.getElementById('error_itn_type')?.classList.remove('show');
+    function renderTargetsTab() {
+        const body = document.getElementById('targetsBody');
+        if (!body) return;
+
+        const tree      = buildTargetsTree();
+        const submitted = getSubmittedSet();
+        const districts = Object.keys(tree).sort();
+
+        if (!districts.length) {
+            body.innerHTML = `<div class="an-no-data">
+              <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              <div>No location data loaded. Ensure cascading_data1.csv is present.</div>
+            </div>`;
+            return;
         }
-        if ((pbo || ig2) && !validateITNQuantities()) isValid = false;
-        document.querySelectorAll('.itn-field').forEach(field => {
-            const maxField = document.getElementById(field.getAttribute('data-max-field'));
-            if (maxField && (parseInt(field.value)||0) > (parseInt(maxField.value)||0)) {
-                isValid = false; field.classList.add('error');
-                document.getElementById('error_'+field.id)?.classList.add('show');
+
+        // Show banner if sheet data not yet fetched
+        const sheetBanner = _sheetRows.length === 0
+            ? `<div class="alert" style="background:#fff8e1;border:1px solid #ffe082;border-radius:9px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;font-size:12px;color:#8a6500;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#c8991a" stroke-width="2" width="16" height="16"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                Submission counts show ICF-SL Server data only. Hit <strong>REFRESH</strong> to pull the latest from the server.
+              </div>`
+            : `<div class="alert" style="background:#e8f5e9;border:1px solid #b2dfcc;border-radius:9px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:8px;font-size:12px;color:#2e7d32;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#28a745" stroke-width="2" width="16" height="16"><path d="M9 11l3 3L22 4"/></svg>
+                Showing <strong>${_sheetRows.length} submissions</strong> from ICF-SL Server.
+              </div>`;
+        let natSchools = 0, natDone = 0;
+        districts.forEach(d => {
+            Object.values(tree[d].chiefdoms).forEach(c => {
+                natSchools += c.schools.length;
+                natDone    += c.schools.filter(s => submitted.has(s.key)).length;
+            });
+        });
+        const natPct = natSchools > 0 ? Math.round((natDone / natSchools) * 100) : 0;
+
+        // Duplicate rows banner
+        const dups = window.CSV_DUPLICATES || [];
+        const dupBanner = dups.length > 0 ? `
+            <div style="background:#fff0f0;border:2px solid #dc3545;border-radius:10px;margin-bottom:14px;overflow:hidden;">
+              <div style="background:#dc3545;color:#fff;padding:9px 14px;display:flex;align-items:center;gap:8px;font-family:'Oswald',sans-serif;font-size:12px;font-weight:600;letter-spacing:.5px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" width="14" height="14"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                ${dups.length} DUPLICATE ROW${dups.length>1?'S':''} IN CSV — SKIPPED FROM COUNT
+              </div>
+              <div style="padding:10px 14px;overflow-x:auto;">
+                <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                  <thead><tr style="background:#fde8e8;">
+                    <th style="padding:6px 10px;text-align:left;font-family:'Oswald',sans-serif;color:#c0392b;font-weight:600;white-space:nowrap;">CSV ROW</th>
+                    <th style="padding:6px 10px;text-align:left;font-family:'Oswald',sans-serif;color:#c0392b;font-weight:600;">DISTRICT</th>
+                    <th style="padding:6px 10px;text-align:left;font-family:'Oswald',sans-serif;color:#c0392b;font-weight:600;">CHIEFDOM</th>
+                    <th style="padding:6px 10px;text-align:left;font-family:'Oswald',sans-serif;color:#c0392b;font-weight:600;">PHU</th>
+                    <th style="padding:6px 10px;text-align:left;font-family:'Oswald',sans-serif;color:#c0392b;font-weight:600;">COMMUNITY</th>
+                    <th style="padding:6px 10px;text-align:left;font-family:'Oswald',sans-serif;color:#c0392b;font-weight:600;">SCHOOL</th>
+                  </tr></thead>
+                  <tbody>${dups.map((r,i)=>`<tr style="background:${i%2?'#fff':'#fff5f5'};">
+                    <td style="padding:5px 10px;color:#8090a0;">${r.row}</td>
+                    <td style="padding:5px 10px;">${r.district}</td>
+                    <td style="padding:5px 10px;">${r.chiefdom}</td>
+                    <td style="padding:5px 10px;">${r.phu}</td>
+                    <td style="padding:5px 10px;">${r.community}</td>
+                    <td style="padding:5px 10px;font-weight:600;color:#c0392b;">${r.school}</td>
+                  </tr>`).join('')}</tbody>
+                </table>
+              </div>
+              <div style="padding:8px 14px;font-size:10px;color:#607080;border-top:1px solid #fde8e8;">Fix these duplicates in cascading_data1.csv to ensure accurate target counts.</div>
+            </div>` : '';
+
+        // ── Build HTML ───────────────────────────────────────────
+        let html = sheetBanner + dupBanner + `
+        <style>
+        .tg-kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:18px;}
+        .tg-kpi{background:#fff;border-radius:10px;padding:14px 10px;text-align:center;box-shadow:0 2px 8px rgba(0,64,128,.07);border-top:4px solid #004080;}
+        .tg-kpi.g{border-top-color:#28a745;} .tg-kpi.r{border-top-color:#dc3545;} .tg-kpi.o{border-top-color:#f0a500;}
+        .tg-kv{font-family:'Oswald',sans-serif;font-size:28px;font-weight:700;color:#004080;line-height:1;}
+        .tg-kpi.g .tg-kv{color:#28a745;} .tg-kpi.r .tg-kv{color:#dc3545;} .tg-kpi.o .tg-kv{color:#b8860b;}
+        .tg-kl{font-size:10px;color:#607080;text-transform:uppercase;letter-spacing:.5px;margin-top:5px;font-family:'Oswald',sans-serif;}
+        .tg-nat-bar{height:14px;background:#e4eaf2;border-radius:7px;overflow:hidden;margin:10px 0 18px;}
+        .tg-nat-fill{height:100%;border-radius:7px;transition:width .5s;background:linear-gradient(90deg,#004080,#1a6abf);}
+        .tg-nat-lbl{font-family:'Oswald',sans-serif;font-size:11px;color:#607080;text-align:center;margin-top:-14px;position:relative;}
+
+        /* District card */
+        .tg-dist{background:#fff;border-radius:12px;box-shadow:0 2px 10px rgba(0,64,128,.08);overflow:hidden;margin-bottom:14px;border:2px solid #d0dce8;}
+        .tg-dist-hdr{background:linear-gradient(135deg,#004080,#1a6abf);color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px;cursor:pointer;}
+        .tg-dist-hdr svg{width:14px;height:14px;stroke:#fff;fill:none;flex-shrink:0;}
+        .tg-dist-name{font-family:'Oswald',sans-serif;font-size:14px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;flex:1;}
+        .tg-dist-badge{background:rgba(255,255,255,.2);border:1px solid rgba(255,255,255,.4);border-radius:6px;padding:3px 10px;font-family:'Oswald',sans-serif;font-size:11px;white-space:nowrap;}
+        .tg-dist-progress{height:4px;background:rgba(255,255,255,.25);}
+        .tg-dist-progress-fill{height:100%;background:#c8991a;transition:width .4s;}
+
+        /* District stats row */
+        .tg-dist-stats{display:grid;grid-template-columns:repeat(4,1fr);background:#f0f6ff;border-bottom:1px solid #d0dce8;}
+        .tg-dist-stat{padding:10px 8px;text-align:center;border-right:1px solid #d0dce8;}
+        .tg-dist-stat:last-child{border-right:none;}
+        .tg-dst-v{font-family:'Oswald',sans-serif;font-size:18px;font-weight:700;color:#004080;}
+        .tg-dst-l{font-size:9px;color:#607080;text-transform:uppercase;letter-spacing:.4px;margin-top:2px;}
+
+        /* Chiefdom table */
+        .tg-chief-wrap{overflow-x:auto;}
+        .tg-chief-tbl{width:100%;border-collapse:collapse;font-size:12px;}
+        .tg-chief-tbl thead tr{background:#e8f1fa;}
+        .tg-chief-tbl th{padding:9px 14px;font-family:'Oswald',sans-serif;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:#004080;text-align:left;white-space:nowrap;border-bottom:2px solid #c5d9f0;}
+        .tg-chief-tbl td{padding:9px 14px;border-bottom:1px solid #f0f4f8;vertical-align:middle;}
+        .tg-chief-tbl tr:last-child td{border-bottom:none;}
+        .tg-chief-tbl tr:nth-child(even) td{background:#fafcff;}
+        .tg-chief-tbl tr:hover td{background:#eef5ff;}
+        .tg-prog-cell{display:flex;align-items:center;gap:8px;}
+        .tg-prog-bar{background:#e4eaf2;border-radius:4px;height:8px;flex:1;overflow:hidden;min-width:60px;}
+        .tg-prog-fill{height:100%;border-radius:4px;}
+        .tg-school-chips{display:flex;flex-wrap:wrap;gap:3px;max-width:340px;}
+        .tg-chip{display:inline-block;padding:2px 7px;border-radius:12px;font-size:10px;font-weight:600;white-space:nowrap;}
+        .tg-chip.done{background:#e8f5e9;color:#28a745;border:1px solid #b2dfcc;}
+        .tg-chip.pend{background:#fff8e1;color:#b8860b;border:1px solid #ffe082;}
+        .tg-expand-btn{background:none;border:none;cursor:pointer;font-family:'Oswald',sans-serif;font-size:10px;color:#004080;letter-spacing:.4px;text-decoration:underline;padding:0;white-space:nowrap;}
+        </style>
+
+        <div class="tg-kpi-row">
+          <div class="tg-kpi b"><div class="tg-kv">${districts.length}</div><div class="tg-kl">Districts</div></div>
+          <div class="tg-kpi"><div class="tg-kv">${districts.reduce((s,d)=>s+Object.keys(tree[d].chiefdoms).length,0)}</div><div class="tg-kl">Chiefdoms</div></div>
+          <div class="tg-kpi b"><div class="tg-kv">${natSchools.toLocaleString()}</div><div class="tg-kl">Target Schools</div></div>
+          <div class="tg-kpi g"><div class="tg-kv g">${natDone.toLocaleString()}</div><div class="tg-kl">Submitted</div></div>
+          <div class="tg-kpi r"><div class="tg-kv r">${(natSchools-natDone).toLocaleString()}</div><div class="tg-kl">Remaining</div></div>
+          <div class="tg-kpi ${natPct>=80?'g':natPct>=50?'o':'r'}"><div class="tg-kv">${natPct}%</div><div class="tg-kl">Progress</div></div>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <div style="display:flex;justify-content:space-between;font-family:'Oswald',sans-serif;font-size:11px;color:#607080;margin-bottom:5px;">
+            <span>NATIONAL PROGRESS</span><span style="font-weight:700;color:${natPct>=80?'#28a745':natPct>=50?'#b8860b':'#dc3545'}">${natDone} / ${natSchools} schools (${natPct}%)</span>
+          </div>
+          <div class="tg-nat-bar"><div class="tg-nat-fill" style="width:${natPct}%;background:${natPct>=80?'#28a745':natPct>=50?'#f0a500':'#dc3545'};"></div></div>
+        </div>`;
+
+        districts.forEach((district, di) => {
+            const chiefdoms = Object.keys(tree[district].chiefdoms).sort();
+            let dTotal = 0, dDone = 0;
+            chiefdoms.forEach(c => {
+                const schs = tree[district].chiefdoms[c].schools;
+                dTotal += schs.length;
+                dDone  += schs.filter(s => submitted.has(s.key)).length;
+            });
+            const dPct  = dTotal > 0 ? Math.round((dDone / dTotal) * 100) : 0;
+            const dCol  = dPct >= 80 ? '#28a745' : dPct >= 50 ? '#f0a500' : '#dc3545';
+            const panelId = 'tg-panel-' + di;
+
+            html += `
+            <div class="tg-dist">
+              <div class="tg-dist-hdr" onclick="document.getElementById('${panelId}').style.display=document.getElementById('${panelId}').style.display==='none'?'block':'none'">
+                <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                <span class="tg-dist-name">${district}</span>
+                <span class="tg-dist-badge">${chiefdoms.length} chiefdom${chiefdoms.length!==1?'s':''}</span>
+                <span class="tg-dist-badge">${dTotal} schools</span>
+                <span class="tg-dist-badge" style="background:${dPct>=80?'rgba(40,167,69,.35)':dPct>=50?'rgba(240,165,0,.35)':'rgba(220,53,69,.35)'};border-color:${dCol};">${dPct}%</span>
+                <svg viewBox="0 0 24 24" style="width:12px;height:12px;flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+              </div>
+              <div class="tg-dist-progress"><div class="tg-dist-progress-fill" style="width:${dPct}%;"></div></div>
+
+              <div id="${panelId}">
+                <div class="tg-dist-stats">
+                  <div class="tg-dist-stat"><div class="tg-dst-v">${chiefdoms.length}</div><div class="tg-dst-l">Chiefdoms</div></div>
+                  <div class="tg-dist-stat"><div class="tg-dst-v">${dTotal}</div><div class="tg-dst-l">Target Schools</div></div>
+                  <div class="tg-dist-stat"><div class="tg-dst-v" style="color:#28a745;">${dDone}</div><div class="tg-dst-l">Submitted</div></div>
+                  <div class="tg-dist-stat"><div class="tg-dst-v" style="color:#dc3545;">${dTotal-dDone}</div><div class="tg-dst-l">Remaining</div></div>
+                </div>
+
+                <div class="tg-chief-wrap">
+                  <table class="tg-chief-tbl">
+                    <thead><tr>
+                      <th>#</th>
+                      <th>Chiefdom</th>
+                      <th style="text-align:center;">Target</th>
+                      <th style="text-align:center;">Submitted</th>
+                      <th style="text-align:center;">Remaining</th>
+                      <th style="min-width:160px;">Progress</th>
+                      <th>Schools</th>
+                    </tr></thead>
+                    <tbody>`;
+
+            chiefdoms.forEach((chiefdom, ci) => {
+                const schs   = tree[district].chiefdoms[chiefdom].schools;
+                const cTotal = schs.length;
+                const cDone  = schs.filter(s => submitted.has(s.key)).length;
+                const cPct   = cTotal > 0 ? Math.round((cDone / cTotal) * 100) : 0;
+                const cCol   = cPct >= 80 ? '#28a745' : cPct >= 50 ? '#f0a500' : '#dc3545';
+                const chipsId = `chips-${di}-${ci}`;
+
+                // Show first 5 schools as chips, expandable
+                const chips = schs.map(s => {
+                    const done  = submitted.has(s.key);
+                    const label = s.name.length > 22 ? s.name.substring(0,20)+'…' : s.name;
+                    return `<span class="tg-chip ${done?'done':'pend'}" title="${s.name} · ${s.community}">${done?'✓ ':''}${label}</span>`;
+                }).join('');
+
+                html += `
+                      <tr>
+                        <td style="color:#8090a0;font-size:11px;">${ci+1}</td>
+                        <td style="font-weight:700;color:#004080;white-space:nowrap;">${chiefdom}</td>
+                        <td style="text-align:center;font-weight:700;">${cTotal}</td>
+                        <td style="text-align:center;font-weight:700;color:#28a745;">${cDone}</td>
+                        <td style="text-align:center;font-weight:700;color:${cTotal-cDone>0?'#dc3545':'#28a745'};">${cTotal-cDone}</td>
+                        <td>
+                          <div class="tg-prog-cell">
+                            <div class="tg-prog-bar"><div class="tg-prog-fill" style="width:${cPct}%;background:${cCol};"></div></div>
+                            <span style="font-family:'Oswald',sans-serif;font-size:11px;font-weight:700;color:${cCol};white-space:nowrap;">${cPct}%</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="tg-school-chips" id="${chipsId}">
+                            ${chips}
+                          </div>
+                        </td>
+                      </tr>`;
+            });
+
+            html += `
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>`;
+        });
+
+        body.innerHTML = html;
+
+        // Set the first district panel open by default
+        const firstPanel = document.getElementById('tg-panel-0');
+        if (firstPanel) firstPanel.style.display = 'block';
+        // Others closed
+        districts.forEach((_, i) => {
+            if (i > 0) {
+                const p = document.getElementById('tg-panel-' + i);
+                if (p) p.style.display = 'none';
             }
         });
     }
 
-    if (!isValid) {
-        showNotification('Please fill in all required fields correctly.', 'error');
-        firstInvalid?.focus();
-        firstInvalid?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    return isValid;
-}
+    // ── Open/close analysis ───────────────────────────────
+    window.openAnalysisModal = async function(){
+        const modal=document.getElementById('analysisModal');
+        if(!modal)return;
+        modal.classList.add('show');
+        switchAnTab('analysis');   // default to analysis tab
+        initDistrictFilter();
 
-function updateProgress() {
-    const pf = document.getElementById('progressFill');
-    const pt = document.getElementById('progressText');
-    if (pf) pf.style.width = (state.currentSection / state.totalSections * 100) + '%';
-    if (pt) pt.textContent = 'SECTION ' + state.currentSection + ' OF ' + state.totalSections;
-}
+        const body=document.getElementById('analysisBody');
+        const sub=document.getElementById('anSubtitle');
+        if(body)body.innerHTML=`<div class="an-loading"><div class="an-spinner"></div><div class="an-load-txt">Fetching data from ICF-SL Server…</div></div>`;
+        if(sub)sub.textContent='Loading…';
 
-// ============================================
-// VALIDATION
-// ============================================
-function setupValidation() {
-    document.querySelectorAll('.itn-field').forEach(input => {
-        input.addEventListener('input', function() { validateITNField(this); calculateAll(); });
-    });
-    document.querySelectorAll('.enrollment-field').forEach(input => {
-        input.addEventListener('input', function() {
-            const itnField = document.getElementById('c'+this.dataset.class+'_'+this.dataset.gender+'_itn');
-            if (itnField) validateITNField(itnField);
-            calculateAll();
-        });
-    });
-}
+        // Fetch submissions; targets come from the CSV already in memory
+        const sheetRows = await fetchSheetData();
+        _sheetRows = sheetRows;
+        window._TARGETS = buildTargetsFromCSV();
 
-function validateITNField(itnInput) {
-    if (!itnInput) return true;
-    const maxField = document.getElementById(itnInput.dataset.maxField);
-    if (!maxField) return true;
-    const maxVal = parseInt(maxField.value)||0, itnVal = parseInt(itnInput.value)||0;
-    const errorEl = document.getElementById('error_'+itnInput.id);
-    if (itnVal > maxVal) { itnInput.classList.add('error'); errorEl?.classList.add('show'); return false; }
-    itnInput.classList.remove('error'); errorEl?.classList.remove('show'); return true;
-}
-
-// ============================================
-// ITN TYPE QUANTITY
-// ============================================
-window.toggleITNTypeQuantity = function() {
-    const pbo = document.getElementById('itn_type_pbo')?.checked||false;
-    const ig2 = document.getElementById('itn_type_ig2')?.checked||false;
-    const qtyFields = document.getElementById('itn_quantity_fields');
-    if (qtyFields) qtyFields.style.display = (pbo||ig2)?'block':'none';
-    const pboGroup = document.getElementById('pbo_quantity_group');
-    if (pboGroup) pboGroup.style.display = pbo?'block':'none';
-    const ig2Group = document.getElementById('ig2_quantity_group');
-    if (ig2Group) ig2Group.style.display = ig2?'block':'none';
-    if (!pbo) { const el=document.getElementById('itn_qty_pbo'); if(el) el.value=0; }
-    if (!ig2) { const el=document.getElementById('itn_qty_ig2'); if(el) el.value=0; }
-    validateITNQuantities();
-};
-
-function validateITNQuantities() {
-    const received = parseInt(document.getElementById('itns_received')?.value)||0;
-    const pbo = document.getElementById('itn_type_pbo')?.checked||false;
-    const ig2 = document.getElementById('itn_type_ig2')?.checked||false;
-    if (!pbo && !ig2) return true;
-    const pboQty = parseInt(document.getElementById('itn_qty_pbo')?.value)||0;
-    const ig2Qty = parseInt(document.getElementById('itn_qty_ig2')?.value)||0;
-    const fromTypes = pboQty + ig2Qty;
-    const totalEl = document.getElementById('itn_type_total');
-    const statusEl = document.getElementById('itn_qty_status');
-    const errEl = document.getElementById('error_itn_qty_mismatch');
-    if (totalEl) totalEl.textContent = fromTypes;
-    if (received > 0) {
-        if (fromTypes === received) {
-            if (statusEl) { statusEl.textContent = '✓ Matches total received'; statusEl.className = 'qty-status match'; }
-            if (errEl) errEl.style.display = 'none';
-            return true;
-        } else {
-            if (statusEl) { statusEl.textContent = '✗ Does not match ('+received+' received)'; statusEl.className = 'qty-status mismatch'; }
-            if (errEl) errEl.style.display = 'block';
-            return false;
-        }
-    }
-    if (statusEl) { statusEl.textContent = ''; statusEl.className = 'qty-status'; }
-    if (errEl) errEl.style.display = 'none';
-    return true;
-}
-
-// ============================================
-// PHONE VALIDATION
-// ============================================
-function setupPhoneValidation() {
-    document.querySelectorAll('.phone-field').forEach(input => {
-        input.addEventListener('input', function() {
-            this.value = this.value.replace(/\D/g,'').slice(0,9);
-            validatePhoneField(this);
-        });
-    });
-}
-
-function validatePhoneField(input) {
-    if (!input) return true;
-    const errorEl = document.getElementById('error_'+input.id);
-    const isReq = input.hasAttribute('required');
-    const val = input.value.trim();
-    if (val===''&&!isReq) { input.classList.remove('error'); errorEl?.classList.remove('show'); return true; }
-    if (val.length!==9||!/^\d{9}$/.test(val)) { input.classList.add('error'); errorEl?.classList.add('show'); return false; }
-    input.classList.remove('error'); errorEl?.classList.remove('show'); return true;
-}
-
-// ============================================
-// NAME VALIDATION
-// ============================================
-function setupNameValidation() {
-    document.querySelectorAll('.name-field').forEach(input => {
-        input.addEventListener('input',  function() { this.value = this.value.replace(/[0-9]/g,''); });
-        input.addEventListener('blur',   function() { validateNameField(this); });
-    });
-}
-
-function validateNameField(input) {
-    if (!input) return true;
-    const errorEl = document.getElementById('error_'+input.id);
-    const isReq = input.hasAttribute('required');
-    const val = input.value.trim();
-    if (val===''&&!isReq) { input.classList.remove('error'); errorEl?.classList.remove('show'); return true; }
-    if (val===''&&isReq)  { input.classList.add('error'); errorEl?.classList.add('show'); return false; }
-    if (/[0-9]/.test(val)) {
-        input.classList.add('error');
-        if (errorEl) { errorEl.textContent='Name cannot contain numbers'; errorEl.classList.add('show'); }
-        return false;
-    }
-    if (val.length < 2) {
-        input.classList.add('error');
-        if (errorEl) { errorEl.textContent='Name must be at least 2 characters'; errorEl.classList.add('show'); }
-        return false;
-    }
-    input.classList.remove('error'); errorEl?.classList.remove('show'); return true;
-}
-
-// ============================================
-// CALCULATIONS
-// ============================================
-function setupCalculations() {
-    document.querySelectorAll('.enrollment-field, .itn-field').forEach(input => {
-        input.addEventListener('input', calculateAll);
-    });
-    const rec = document.getElementById('itns_received');
-    if (rec) rec.addEventListener('input', () => { calculateAll(); validateITNQuantities(); });
-}
-
-function getNum(id) { const el=document.getElementById(id); return el?(parseInt(el.value)||0):0; }
-function setText(id,v){ const el=document.getElementById(id); if(el) el.textContent=v; }
-function setVal(id,v) { const el=document.getElementById(id); if(el) el.value=v; }
-
-function calculateAll() {
-    try {
-        let tB=0,tG=0,tBI=0,tGI=0;
-        for (let c=1;c<=5;c++) {
-            const b=getNum('c'+c+'_boys'), bi=getNum('c'+c+'_boys_itn'),
-                  g=getNum('c'+c+'_girls'), gi=getNum('c'+c+'_girls_itn');
-            tB+=b; tG+=g; tBI+=bi; tGI+=gi;
-            setText('t'+c+'_b',b); setText('t'+c+'_bi',bi);
-            setText('t'+c+'_g',g); setText('t'+c+'_gi',gi);
-            setText('t'+c+'_t',b+g); setText('t'+c+'_ti',bi+gi);
-            setText('t'+c+'_c',(b+g)>0?Math.round(((bi+gi)/(b+g))*100)+'%':'0%');
-        }
-        const tp=tB+tG, ti=tBI+tGI;
-        setText('sum_total_boys',tB); setText('sum_total_girls',tG); setText('sum_total_pupils',tp);
-        setText('sum_boys_itn',tBI); setText('sum_girls_itn',tGI); setText('sum_total_itn',ti);
-        setVal('total_boys',tB); setVal('total_girls',tG); setVal('total_pupils',tp);
-        setVal('total_boys_itn',tBI); setVal('total_girls_itn',tGI); setVal('total_itn',ti);
-        const received=getNum('itns_received'), remaining=received-ti;
-        setText('itns_remaining',remaining); setVal('itns_remaining_val',remaining);
-        const rs=document.getElementById('remaining_status');
-        if (rs) {
-            if (remaining<0) { rs.textContent='Warning: More ITNs distributed than received!'; rs.className='remaining-status warning'; }
-            else if (remaining===0&&received>0) { rs.textContent='All ITNs distributed'; rs.className='remaining-status success'; }
-            else { rs.textContent=''; rs.className='remaining-status'; }
-        }
-        const boysPct=tp>0?Math.round((tB/tp)*100):0, girlsPct=tp>0?Math.round((tG/tp)*100):0;
-        setText('prop_boys',boysPct+'%'); setText('prop_girls',girlsPct+'%');
-        setVal('prop_boys_val',boysPct); setVal('prop_girls_val',girlsPct);
-        const bb=document.getElementById('bar_boys'); if(bb) bb.style.width=boysPct+'%';
-        const gb=document.getElementById('bar_girls'); if(gb) gb.style.width=girlsPct+'%';
-        const bc=tB>0?Math.round((tBI/tB)*100):0, gc=tG>0?Math.round((tGI/tG)*100):0,
-              tc=tp>0?Math.round((ti/tp)*100):0;
-        setText('cov_boys',bc+'%'); setText('cov_girls',gc+'%'); setText('cov_total',tc+'%');
-        setVal('coverage_boys',bc); setVal('coverage_girls',gc); setVal('coverage_total',tc);
-        setText('tt_b',tB); setText('tt_bi',tBI); setText('tt_g',tG); setText('tt_gi',tGI);
-        setText('tt_t',tp); setText('tt_ti',ti);
-        setText('tt_c',tp>0?Math.round((ti/tp)*100)+'%':'0%');
-        updateCharts();
-    } catch (e) { console.error('calculateAll:', e); }
-}
-
-// ============================================
-// CHARTS (form section D)
-// ============================================
-function updateCharts() {
-    try {
-        const tB=getNum('total_boys'), tG=getNum('total_girls'),
-              bi=getNum('total_boys_itn'), gi=getNum('total_girls_itn');
-        const donutOpts = { responsive:true, maintainAspectRatio:true, plugins:{ legend:{ position:'bottom' } } };
-
-        const c1=document.getElementById('chartEnrollment');
-        if (c1) { if(state.charts.enrollment) state.charts.enrollment.destroy();
-            state.charts.enrollment=new Chart(c1,{type:'doughnut',data:{labels:['Boys','Girls'],datasets:[{data:[tB,tG],backgroundColor:['#004080','#e91e8c'],borderWidth:2,borderColor:'#fff'}]},options:donutOpts}); }
-
-        const c2=document.getElementById('chartITN');
-        if (c2) { if(state.charts.itn) state.charts.itn.destroy();
-            state.charts.itn=new Chart(c2,{type:'doughnut',data:{labels:['Boys','Girls'],datasets:[{data:[bi,gi],backgroundColor:['#004080','#e91e8c'],borderWidth:2,borderColor:'#fff'}]},options:donutOpts}); }
-
-        const c3=document.getElementById('chartCoverage');
-        if (c3) {
-            const covs=[];
-            for(let c=1;c<=5;c++){const t=getNum('c'+c+'_boys')+getNum('c'+c+'_girls'),i=getNum('c'+c+'_boys_itn')+getNum('c'+c+'_girls_itn');covs.push(t>0?Math.round((i/t)*100):0);}
-            if(state.charts.coverage) state.charts.coverage.destroy();
-            state.charts.coverage=new Chart(c3,{type:'bar',data:{labels:['Class 1','Class 2','Class 3','Class 4','Class 5'],datasets:[{label:'Coverage %',data:covs,backgroundColor:covs.map(v=>v>=80?'#28a745':v>=50?'#f0a500':'#dc3545'),borderWidth:0,borderRadius:5}]},options:{responsive:true,maintainAspectRatio:true,scales:{y:{beginAtZero:true,max:100}},plugins:{legend:{display:false}}}});
-        }
-    } catch (e) { console.error('updateCharts:', e); }
-}
-
-// ============================================
-// GPS
-// ============================================
-window.captureGPS = function() {
-    const icon=document.getElementById('gps_icon'), status=document.getElementById('gps_status'), coords=document.getElementById('gps_coords');
-    if (!navigator.geolocation) { if(icon)icon.classList.add('error'); if(status)status.textContent='GPS not supported'; return; }
-    if(icon)icon.classList.add('loading'); if(status)status.textContent='Capturing GPS...';
-    navigator.geolocation.getCurrentPosition(
-        pos => {
-            const {latitude,longitude,accuracy}=pos.coords;
-            setVal('gps_lat',latitude.toFixed(6)); setVal('gps_lng',longitude.toFixed(6)); setVal('gps_acc',Math.round(accuracy));
-            if(icon){icon.classList.remove('loading');icon.classList.add('success');}
-            if(status)status.textContent='GPS captured!';
-            if(coords)coords.textContent=latitude.toFixed(5)+', '+longitude.toFixed(5)+' (±'+Math.round(accuracy)+'m)';
-        },
-        () => { if(icon){icon.classList.remove('loading');icon.classList.add('error');} if(status)status.textContent='GPS failed (optional)'; },
-        {enableHighAccuracy:true,timeout:30000,maximumAge:0}
-    );
-};
-
-// ============================================
-// SIGNATURE PADS
-// ============================================
-function initAllSignaturePads() { for(let i=1;i<=3;i++) initTeamSignaturePad(i); }
-
-function initTeamSignaturePad(n) {
-    const canvas=document.getElementById('sig'+n+'Canvas'); if(!canvas) return;
-    canvas.width=canvas.parentElement.offsetWidth-10; canvas.height=100;
-    state.signaturePads[n]=new SignaturePad(canvas,{backgroundColor:'#fff',penColor:'#000'});
-    state.signaturePads[n].addEventListener('endStroke',()=>{
-        const h=document.getElementById('team'+n+'_signature'); if(h) h.value=state.signaturePads[n].toDataURL();
-    });
-}
-
-window.clearTeamSignature = function(n) {
-    if(state.signaturePads[n]){state.signaturePads[n].clear();const h=document.getElementById('team'+n+'_signature');if(h)h.value='';}
-};
-
-function clearSignature() { for(let i=1;i<=3;i++) clearTeamSignature(i); }
-
-// ============================================
-// ============================================
-// SILENT AUTO-SAVE & AUTO-RESTORE
-// Saves every field change to localStorage automatically.
-// Restores silently on next load — no banners, no buttons.
-// ============================================
-const DRAFT_KEY = 'itn_single_draft';
-
-function collectDraftData() {
-    const formData = new FormData(document.getElementById('dataForm'));
-    const data = {
-        _savedAt:        new Date().toISOString(),
-        _currentSection: state.currentSection,
-        itn_type_pbo:    document.getElementById('itn_type_pbo')?.checked || false,
-        itn_type_ig2:    document.getElementById('itn_type_ig2')?.checked || false,
+        runAnalysis(sheetRows);
     };
-    for (const [k, v] of formData.entries()) data[k] = v;
-    return data;
-}
 
-function autoSaveDraft() {
-    try {
-        localStorage.setItem(DRAFT_KEY, JSON.stringify(collectDraftData()));
-    } catch(e) {}
-}
+    window.closeAnalysisModal=function(){
+        destroyCharts();
+        document.getElementById('analysisModal')?.classList.remove('show');
+    };
 
-function clearDraft() {
-    try { localStorage.removeItem(DRAFT_KEY); } catch(e) {}
-    state.currentDraftId = null;
-    state.drafts = [];
-    saveToStorage();
-    updateCounts();
-}
+    window.anRefresh=async function(){
+        const body=document.getElementById('analysisBody');
+        if(body)body.innerHTML=`<div class="an-loading"><div class="an-spinner"></div><div class="an-load-txt">Refreshing from ICF-SL Server…</div></div>`;
+        const rows = await fetchSheetData();
+        _sheetRows = rows;
+        window._TARGETS = buildTargetsFromCSV();
+        runAnalysis(rows);
+        // Also re-render targets if that panel is visible
+        const tBody = document.getElementById('targetsBody');
+        if (tBody && tBody.style.display !== 'none') renderTargetsTab();
+    };
 
-// Called from startApp — silently restores previous session if exists
-function restoreDraftIfExists() {
-    try {
-        const raw = localStorage.getItem(DRAFT_KEY);
-        if (!raw) return;
-        const draft = JSON.parse(raw);
-        if (!draft || !draft._savedAt) return;
-        _applyDraft(draft);
-    } catch(e) { console.warn('[AutoSave] Restore failed:', e.message); }
-}
-
-function _applyDraft(draft) {
-    const geoChain = [
-        ['district',    draft.district],
-        ['chiefdom',    draft.chiefdom],
-        ['facility',    draft.facility],
-        ['community',   draft.community],
-        ['school_name', draft.school_name]
-    ];
-    let delay = 0;
-    geoChain.forEach(([elId, val]) => {
-        if (!val) return;
-        setTimeout(() => {
-            const el = document.getElementById(elId);
-            if (el) { el.value = val; el.dispatchEvent(new Event('change')); }
-        }, delay);
-        delay += 120;
-    });
-
-    const skip = new Set([
-        '_savedAt','_currentSection','itn_type_pbo','itn_type_ig2',
-        'district','chiefdom','facility','community','school_name'
-    ]);
-    setTimeout(() => {
-        Object.entries(draft).forEach(([k, v]) => {
-            if (skip.has(k)) return;
-            const el = document.getElementById(k);
-            if (el && el.type !== 'hidden') el.value = v;
-        });
-        const pbo = document.getElementById('itn_type_pbo');
-        const ig2 = document.getElementById('itn_type_ig2');
-        if (pbo) pbo.checked = !!draft.itn_type_pbo;
-        if (ig2) ig2.checked = !!draft.itn_type_ig2;
-        toggleITNTypeQuantity();
-
-        const sec = parseInt(draft._currentSection) || 1;
-        document.querySelectorAll('.form-section').forEach(s => s.classList.remove('active'));
-        state.currentSection = sec;
-        document.querySelector('.form-section[data-section="'+sec+'"]')?.classList.add('active');
-        updateProgress();
-        calculateAll();
-    }, delay + 100);
-}
-
-function setupAutoSave() {
-    const form = document.getElementById('dataForm');
-    if (!form) return;
-    let _t = null;
-    const trigger = () => { clearTimeout(_t); _t = setTimeout(autoSaveDraft, 600); };
-    form.addEventListener('input',  trigger);
-    form.addEventListener('change', trigger);
-}
-
-// ── No-op stubs (keep compat with any old HTML references) ───
-window.saveDraftNow       = function() {};
-window.resumeDraft        = function() {};
-window.discardDraft       = function() {};
-window.showDraftNameModal = function() {};
-window.cancelDraftName    = function() {};
-window.confirmSaveDraft   = function() {};
-window.openDraftsModal    = function() {};
-window.closeDraftsModal   = function() {};
-window.loadDraft          = function() {};
-window.deleteDraft        = function() {};
-function generateDraftName() { return 'Draft'; }
-function updateDraftIndicator() {}
-
-// ============================================
-// FINALIZE & SUBMIT
-// ============================================
-window.finalizeForm = function() {
-    for(let s=2;s<=state.totalSections;s++){
-        state.currentSection=s;
-        if(!validateCurrentSection()){
-            document.querySelectorAll('.form-section').forEach(sec=>sec.classList.remove('active'));
-            document.querySelector('.form-section[data-section="'+s+'"]')?.classList.add('active');
-            updateProgress(); return;
-        }
+    // ════════════════════════════════════════════════════════
+    //  AI STATS STRIP
+    // ════════════════════════════════════════════════════════
+    function statsHTML(sheetCount){
+        const s=window.state||{};
+        const sess=(s.submittedSchools||[]).length,pend=(s.pendingSubmissions||[]).length,drft=(s.drafts||[]).length;
+        let tp=0,ti=0;
+        [...(s.submittedSchools||[]).map(r=>r.data||r),...(s.pendingSubmissions||[])].forEach(r=>{tp+=+r.total_pupils||0;ti+=+r.total_itn||0;});
+        const pct=tp>0?Math.round((ti/tp)*100):0;
+        const sep='<div class="icf-ai-stat-div"></div>';
+        return[`<div class="icf-ai-stat"><div class="icf-ai-stat-val">${sess}</div><div class="icf-ai-stat-lbl">Session</div></div>`,sep,`<div class="icf-ai-stat"><div class="icf-ai-stat-val" style="color:#28a745">${sheetCount!==null?sheetCount:'…'}</div><div class="icf-ai-stat-lbl">In Sheet</div></div>`,sep,`<div class="icf-ai-stat"><div class="icf-ai-stat-val" style="color:#e6a800">${pend}</div><div class="icf-ai-stat-lbl">Pending</div></div>`,sep,`<div class="icf-ai-stat"><div class="icf-ai-stat-val">${drft}</div><div class="icf-ai-stat-lbl">Drafts</div></div>`,sep,`<div class="icf-ai-stat"><div class="icf-ai-stat-val">${tp.toLocaleString()}</div><div class="icf-ai-stat-lbl">Pupils</div></div>`,sep,`<div class="icf-ai-stat"><div class="icf-ai-stat-val">${ti.toLocaleString()}</div><div class="icf-ai-stat-lbl">ITNs</div></div>`,sep,`<div class="icf-ai-stat"><div class="icf-ai-stat-val" style="color:${pct>=80?'#28a745':pct>=50?'#e6a800':'#dc3545'}">${pct}%</div><div class="icf-ai-stat-lbl">Coverage</div></div>`].join('');
     }
-    const pbo=document.getElementById('itn_type_pbo')?.checked||false;
-    const ig2=document.getElementById('itn_type_ig2')?.checked||false;
-    if(!pbo&&!ig2){
-        showNotification('Please select at least one ITN type.','error');
-        state.currentSection=3;
-        document.querySelectorAll('.form-section').forEach(s=>s.classList.remove('active'));
-        document.querySelector('.form-section[data-section="3"]')?.classList.add('active');
-        updateProgress(); return;
-    }
-    if(!validateITNQuantities()){
-        showNotification('ITN type quantities must equal total ITNs received.','error');
-        state.currentSection=3;
-        document.querySelectorAll('.form-section').forEach(s=>s.classList.remove('active'));
-        document.querySelector('.form-section[data-section="3"]')?.classList.add('active');
-        updateProgress(); return;
-    }
-    const team1Sig=document.getElementById('team1_signature');
-    if(!team1Sig||!team1Sig.value){ showNotification('Please provide Team Member 1 signature.','error'); return; }
-    state.formStatus='finalized';
-    const formStatus=document.getElementById('form_status'); if(formStatus) formStatus.value='finalized';
-    const submittedBy=document.getElementById('submitted_by'); if(submittedBy) submittedBy.value=state.currentUser||'';
-    const submitBtn=document.getElementById('submitBtn'); if(submitBtn) submitBtn.disabled=false;
-    const finalizeBtn=document.getElementById('finalizeBtn'); if(finalizeBtn) finalizeBtn.disabled=true;
-    showNotification('Form finalized! You can now submit.','success');
-};
 
-async function handleSubmit(e) {
-    e.preventDefault();
-    if(state.formStatus!=='finalized'){ showNotification('Please finalize the form first.','error'); return; }
+    window.icfAiRefreshStats=async function(){
+        const el=document.getElementById('icfAiStats');if(el)el.innerHTML=statsHTML(null);
+        setStatus('chk','Checking GAS…');
+        const c=await fetchCount();
+        if(el)el.innerHTML=statsHTML(c);
+        setStatus(c==='?'?'err':'ok',c==='?'?'GAS unreachable':'GAS connected · '+c+' records');
+    };
 
-    const formData=new FormData(e.target);
-    const data={timestamp:new Date().toISOString(),submitted_by:state.currentUser||''};
-    for(const [k,v] of formData.entries()) data[k]=v;
-    const pbo=document.getElementById('itn_type_pbo'), ig2=document.getElementById('itn_type_ig2');
-    data.itn_type_pbo=pbo&&pbo.checked?'Yes':'No';
-    data.itn_type_ig2=ig2&&ig2.checked?'Yes':'No';
+    function setStatus(t,m){const el=document.getElementById('icfGasStatus');if(el)el.innerHTML=`<div class="icf-pill ${t}"><div class="icf-dot"></div>${m}</div>`;}
 
-    // ── FINAL DUPLICATE GUARD ──────────────────────────────
-    // Re-check one last time (catches any race condition between
-    // school selection and reaching submit).
-    const submitKey = makeSchoolKey(
-        data.district, data.chiefdom,
-        data.facility, data.community, data.school_name
-    );
+    // ════════════════════════════════════════════════════════
+    //  AI CHAT
+    // ════════════════════════════════════════════════════════
+    let chatHist=[];
 
-    const submitBtn=document.getElementById('submitBtn');
-    if(submitBtn){ submitBtn.disabled=true; submitBtn.innerHTML='<svg class="nav-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> CHECKING...'; }
-
-    const { duplicate: isDup, source: dupSrc } = await isDuplicateSubmission(submitKey);
-    if (isDup) {
-        const srcLabel = dupSrc === 'online'  ? ' — found on Google Sheet'   :
-                         dupSrc === 'pending' ? ' — already in offline queue' :
-                                                ' — submitted this session';
-        showNotification('⛔ DUPLICATE BLOCKED: This school was already submitted' + srcLabel + '.', 'error');
-
-        // Scroll back to section 2 so user can see the banner
-        document.querySelectorAll('.form-section').forEach(s=>s.classList.remove('active'));
-        state.currentSection = 2;
-        document.querySelector('.form-section[data-section="2"]')?.classList.add('active');
-        updateProgress();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-
-        // Make sure banner is visible
-        if (!document.getElementById('schoolSubmittedBanner')) injectSubmittedBanner();
-        const b = document.getElementById('schoolSubmittedBanner');
-        if (b) {
-            const msgEl = b.querySelector('.dup-source-msg');
-            if (msgEl) msgEl.textContent = srcLabel.replace(' — ', ' ');
-            b.style.display = 'flex';
-        }
-        const nextBtn = document.querySelector('.form-section[data-section="2"] .btn-next');
-        if (nextBtn) { nextBtn.disabled = true; nextBtn.title = 'Duplicate — submission blocked.'; }
-
-        state.formStatus = 'draft';
-        const formStatus = document.getElementById('form_status');
-        if (formStatus) formStatus.value = 'draft';
-        const finalizeBtn = document.getElementById('finalizeBtn');
-        if (finalizeBtn) finalizeBtn.disabled = false;
-        if(submitBtn){ submitBtn.disabled=true; submitBtn.innerHTML='<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> SUBMIT'; }
-        return;
-    }
-    // ── END DUPLICATE GUARD ────────────────────────────────
-
-    if(submitBtn){ submitBtn.innerHTML='<svg class="nav-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> SUBMITTING...'; }
-
-    if(state.isOnline){
+    function buildCtx(){
         try{
-            await fetch(CONFIG.SCRIPT_URL,{method:'POST',mode:'no-cors',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
-            markSchoolSubmitted(data);
-            if(state.currentDraftId) state.drafts=state.drafts.filter(d=>d.draftId!==state.currentDraftId);
-            clearDraft();
-            saveToStorage(); updateCounts(); updateSummaryBadge();
-            showNotification('✅ Submitted successfully!','success'); resetForm();
-        } catch(err){ saveOffline(data); }
-    } else { saveOffline(data); }
-    if(submitBtn){ submitBtn.disabled=false; submitBtn.innerHTML='<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg> SUBMIT'; }
-}
-
-function markSchoolSubmitted(data) {
-    const key=makeSchoolKey(data.district,data.chiefdom,data.facility,data.community,data.school_name);
-    if(!isSchoolSubmitted(key))
-        state.submittedSchools.push({key,district:data.district,chiefdom:data.chiefdom,facility:data.facility,community:data.community,school_name:data.school_name,timestamp:data.timestamp,data});
-}
-
-function saveOffline(data) {
-    state.pendingSubmissions.push(data);
-    markSchoolSubmitted(data);
-    clearDraft();
-    saveToStorage(); updateCounts(); updateSummaryBadge();
-    showNotification('Saved offline. Will sync when online.','info'); resetForm();
-}
-
-function resetForm() {
-    document.getElementById('dataForm').reset();
-    clearSignature();
-    state.currentSection=1; state.currentDraftId=null; state.formStatus='draft';
-    document.querySelectorAll('.form-section').forEach(s=>s.classList.remove('active'));
-    document.querySelector('.form-section[data-section="1"]')?.classList.add('active');
-    const submitBtn=document.getElementById('submitBtn'); if(submitBtn) submitBtn.disabled=true;
-    const finalizeBtn=document.getElementById('finalizeBtn'); if(finalizeBtn) finalizeBtn.disabled=false;
-    const sbField=document.getElementById('submitted_by'); if(sbField) sbField.value=state.currentUser||'';
-    const banner=document.getElementById('schoolSubmittedBanner'); if(banner) banner.style.display='none';
-    const nextBtn=document.querySelector('.form-section[data-section="2"] .btn-next');
-    if(nextBtn){ nextBtn.disabled=false; nextBtn.title=''; }
-    ['chiefdom','facility','community','school_name'].forEach(id=>{
-        const el=document.getElementById(id); if(el){el.innerHTML='<option value="">Select...</option>';el.disabled=true;}
-    });
-    ['chiefdom','facility','community','school_name'].forEach(clearCount);
-    updateProgress(); setDefaultDate(); captureGPS(); calculateAll();
-    setTimeout(()=>initAllSignaturePads(),100);
-}
-
-// ============================================
-// DOWNLOAD DATA
-// ============================================
-function downloadData() {
-    const allData=[...state.pendingSubmissions,...state.drafts];
-    if(allData.length===0){ showNotification('No data to download.','info'); return; }
-    const keys=new Set(); allData.forEach(item=>Object.keys(item).forEach(k=>keys.add(k)));
-    const headers=Array.from(keys);
-    let csv=headers.join(',')+'\n';
-    allData.forEach(item=>{
-        csv+=headers.map(h=>{
-            let v=item[h]||'';
-            if(typeof v==='string'&&(v.includes(',')||v.includes('"')||v.includes('\n'))) v='"'+v.replace(/"/g,'""')+'"';
-            return v;
-        }).join(',')+'\n';
-    });
-    const a=document.createElement('a');
-    a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
-    a.download='itn_data_'+new Date().toISOString().split('T')[0]+'.csv';
-    a.click(); URL.revokeObjectURL(a.href);
-    showNotification('Data downloaded!','success');
-}
-
-// ============================================
-// ANALYSIS  (overridden by ai_agent.js)
-// ============================================
-window.openAnalysisModal = function() {
-    // This is overridden by ai_agent.js with the full dashboard.
-    // Fallback: open the analysis modal if it exists.
-    const modal = document.getElementById('analysisModal');
-    if (modal) modal.classList.add('show');
-};
-
-window.closeAnalysisModal = function() {
-    document.getElementById('analysisModal')?.classList.remove('show');
-};
-
-// ============================================
-// UTILITIES
-// ============================================
-function checkAdmin() {
-    // No login required — always admin
-    return true;
-}
-
-function updateOnlineStatus() {
-    const ind=document.getElementById('statusIndicator'), text=document.getElementById('statusText');
-    if(!ind||!text) return;
-    ind.className='status-indicator '+(state.isOnline?'online':'offline');
-    text.textContent=state.isOnline?'ONLINE':'OFFLINE';
-}
-
-function updateCounts() {
-    const dc=document.getElementById('draftCount'), pc=document.getElementById('pendingCount');
-    if(dc) dc.textContent=state.drafts.length;
-    if(pc) pc.textContent=state.pendingSubmissions.length;
-}
-
-function showNotification(msg, type) {
-    const n=document.getElementById('notification'), t=document.getElementById('notificationText');
-    if(!n||!t) return;
-    n.className='notification '+type+' show';
-    t.textContent=msg;
-    setTimeout(()=>n.classList.remove('show'),4000);
-}
-
-function setupEventListeners() {
-    // viewDataBtn — handled by guardedAction in HTML
-    // downloadDataBtn — handled by guardedAction in HTML
-    // viewAnalysisBtn — handled by guardedAction in HTML
-    // viewSummaryBtn — handled by guardedAction in HTML
-    // aiAgentBtn — handled by guardedAction in HTML
-
-    // Expose download so guardedAction can call it
-    window._downloadData = downloadData;
-
-    const df = document.getElementById('dataForm');
-    if (df) df.addEventListener('submit', handleSubmit);
-
-    window.addEventListener('online',  () => { state.isOnline = true;  updateOnlineStatus(); syncPending(); });
-    window.addEventListener('offline', () => { state.isOnline = false; updateOnlineStatus(); });
-
-    document.querySelectorAll('.modal-overlay').forEach(m => {
-        m.addEventListener('click', e => { if (e.target === m) m.classList.remove('show'); });
-    });
-
-    const dni = document.getElementById('draftNameInput');
-    if (dni) dni.addEventListener('keypress', e => { if (e.key === 'Enter') confirmSaveDraft(); });
-
-    document.querySelectorAll('.btn-next').forEach(btn => {
-        btn.onclick = e => { e.preventDefault(); window.nextSection(); };
-    });
-    document.querySelectorAll('.btn-back').forEach(btn => {
-        btn.onclick = e => { e.preventDefault(); window.previousSection(); };
-    });
-}
-
-async function syncPending() {
-    if(state.pendingSubmissions.length===0) return;
-    showNotification('Syncing pending data...','info');
-    const synced=[];
-    for(let i=0;i<state.pendingSubmissions.length;i++){
-        try{ await fetch(CONFIG.SCRIPT_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(state.pendingSubmissions[i])}); synced.push(i); } catch(e){}
+            const all=mergeData(_sheetRows);if(!all.length)return null;
+            let tp=0,ti=0,tb=0,tg=0;const byDist={};
+            all.forEach(r=>{tp+=+r.total_pupils||0;ti+=+r.total_itn||0;tb+=+r.total_boys||0;tg+=+r.total_girls||0;const d=r.district||'Unknown';if(!byDist[d])byDist[d]={n:0,p:0,i:0};byDist[d].n++;byDist[d].p+=+r.total_pupils||0;byDist[d].i+=+r.total_itn||0;});
+            const ov=tp>0?Math.round((ti/tp)*100):0;
+            let ctx=`=== ICF-SL ITN DATA ===\nSchools:${all.length}|Pupils:${tp}(${tb}B/${tg}G)|Distributed:${ti}|Coverage:${ov}%\nBY DISTRICT:\n`;
+            Object.entries(byDist).forEach(([d,v])=>{ctx+=`  ${d}:${v.n} schools,${v.p} pupils,${v.p>0?Math.round((v.i/v.p)*100):0}% cov\n`;});
+            ctx+=`SCHOOLS:\n`;
+            all.slice(0,30).forEach((r,i)=>{const vp=+r.total_pupils||0,vi=+r.total_itn||0,cov=vp>0?Math.round((vi/vp)*100):0;ctx+=`[${i+1}] ${r.school_name||'—'}(${r.community||'—'},${r.district||'—'})P:${vp},ITN:${vi},Cov:${cov}%,by:${r.submitted_by||'—'}\n`;});
+            return ctx;
+        }catch{return null;}
     }
-    if(synced.length>0){
-        state.pendingSubmissions=state.pendingSubmissions.filter((_,i)=>!synced.includes(i));
-        saveToStorage(); updateCounts();
-        showNotification('Synced '+synced.length+' submission(s)!','success');
+
+    function addMsg(role,text){
+        const w=document.getElementById('icfAiMessages');if(!w)return;
+        const d=document.createElement('div');d.className='icf-msg '+role;
+        const isAI=role==='ai';
+        d.innerHTML=`<div class="icf-msg-av">${isAI?'<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>':'<svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'}</div><div class="icf-bub"></div>`;
+        w.appendChild(d);d.querySelector('.icf-bub').innerHTML=md(text);w.scrollTop=w.scrollHeight;
     }
-}
 
-// ============================================
-// KICK OFF
-// ============================================
-init();
+    function showTyp(on){
+        if(on){const w=document.getElementById('icfAiMessages');if(!w)return;const d=document.createElement('div');d.className='icf-msg ai';d.id='icfTyp';d.innerHTML='<div class="icf-msg-av"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg></div><div class="icf-bub"><div class="icf-typing"><span></span><span></span><span></span></div></div>';w.appendChild(d);w.scrollTop=w.scrollHeight;}
+        else{const e=document.getElementById('icfTyp');if(e)e.remove();}
+    }
 
-// Expose globals
-window.captureGPS=captureGPS; window.clearTeamSignature=clearTeamSignature;
-window.toggleITNTypeQuantity=toggleITNTypeQuantity; window.updateApp=updateApp;
-window.nextSection=nextSection; window.previousSection=previousSection;
-window.showDraftNameModal=showDraftNameModal; window.finalizeForm=finalizeForm;
-window.viewSummary=viewSummary; window.openSchoolDetail=openSchoolDetail;
-window.closeSchoolDetailModal=closeSchoolDetailModal; window.loadSchoolIntoForm=loadSchoolIntoForm;
-window.viewSubmittedSchoolFromBanner=viewSubmittedSchoolFromBanner;
-window.openSummaryModal=openSummaryModal; window.closeSummaryModal=closeSummaryModal;
-window.openAnalysisModal=openAnalysisModal; window.closeAnalysisModal=closeAnalysisModal;
-window.openDraftsModal=openDraftsModal; window.closeDraftsModal=closeDraftsModal;
-window.cancelDraftName=cancelDraftName; window.confirmSaveDraft=confirmSaveDraft;
-window.loadDraft=loadDraft; window.deleteDraft=deleteDraft;
-window.validateITNQuantities=validateITNQuantities;
+    function renderSamples(){
+        const r=document.getElementById('icfSqRow');if(!r)return;
+        r.innerHTML='';
+        pickN(4).forEach(q=>{const b=document.createElement('button');b.className='icf-sq';b.textContent=q;b.onclick=()=>icfAiAskQ(q);r.appendChild(b);});
+    }
 
-console.log('[ICF Collect] script_option2.js loaded ✓');
+    function icfAiAskQ(q){const i=document.getElementById('icfAiInput');if(i){i.value=q;icfAiAutoResize(i);}icfAiSend();}
+    window.icfAiAskQuestion=icfAiAskQ;
+
+    window.icfAiSend=async function(){
+        const inp=document.getElementById('icfAiInput'),btn=document.getElementById('icfAiSend');
+        if(!inp)return;const q=inp.value.trim();if(!q)return;
+        inp.value='';icfAiAutoResize(inp);
+        addMsg('user',q);chatHist.push({role:'user',content:q});
+        showTyp(true);if(btn)btn.disabled=true;
+        try{const r=await callGAS(q,chatHist,buildCtx());showTyp(false);addMsg('ai',r);chatHist.push({role:'assistant',content:r});renderSamples();}
+        catch(e){showTyp(false);addMsg('ai',`⚠️ **Error:** ${e.message}`);}
+        finally{if(btn)btn.disabled=false;if(inp)inp.focus();}
+    };
+
+    window.icfAiKeydown   =e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();icfAiSend();}};
+    window.icfAiAutoResize=el=>{el.style.height='auto';el.style.height=Math.min(el.scrollHeight,110)+'px';};
+    window.icfAiClearChat =function(){chatHist=[];const w=document.getElementById('icfAiMessages');if(w)w.innerHTML='<div class="icf-welcome"><div class="icf-welcome-icon">🔄</div><div class="icf-welcome-title">Chat cleared</div><div class="icf-welcome-body">Ask me anything about your ITN data.</div></div><div id="icfGasStatus"></div>';renderSamples();};
+
+    window.icfAiOpen=function(){
+        document.getElementById('icfAiOverlay').classList.add('show');
+        const el=document.getElementById('icfAiStats');if(el)el.innerHTML=statsHTML(null);
+        renderSamples();icfAiRefreshStats();
+        setTimeout(()=>{const i=document.getElementById('icfAiInput');if(i)i.focus();},200);
+    };
+    window.icfAiClose       =()=>document.getElementById('icfAiOverlay').classList.remove('show');
+    window.icfAiOverlayClick=e=>{if(e.target.id==='icfAiOverlay')icfAiClose();};
+    document.addEventListener('keydown',e=>{if(e.key==='Escape'){icfAiClose();closeAnalysisModal();}});
+
+    console.log('[ICF AI Agent] Loaded ✓');
+})();
