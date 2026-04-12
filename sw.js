@@ -1,7 +1,7 @@
 // ============================================================
 //  SBD 2026 — ITN Distribution Survey · Service Worker
 //  BUMP THIS VERSION STRING every time you upload new files:
-const CACHE_VERSION = 'sbd-2026-v13';
+const CACHE_VERSION = 'sbd-2026-v14';
 // ============================================================
 
 // ── YOUR MAIN APP FILES ───────────────────────────────────────
@@ -42,6 +42,8 @@ const CDN_FILES = [
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
   // ── Remote images used as fallbacks ──────────────────────
   'https://github.com/mohamedsillahkanu/gdp-dashboard-2/raw/6c7463b0d5c3be150aafae695a4bcbbd8aeb1499/ICF-SL.jpg',
 ];
