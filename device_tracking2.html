@@ -495,12 +495,27 @@ function resetScanUI(mode) {
 // ============================================
 function onScanResult(decoded, mode) {
     stopScan(mode);
-    var data;
-    try { data = JSON.parse(decoded); } catch(e) {
-        showMessage(mode, 'error', 'INVALID QR CODE', 'This QR code is not a valid device code. Make sure you scan a device tag, not a staff ID card.', '');
+    var parsed;
+    try { parsed = JSON.parse(decoded); } catch(e) {
+        showMessage(mode, 'error', 'INVALID QR CODE', 'Could not read QR. Scan the QR code from the Device Tag app.', '');
         return;
     }
-    if (!data.code) { showMessage(mode, 'error', 'NO DEVICE CODE', 'QR code does not contain a device code.', ''); return; }
+    // Use id field (device tag format) — no .code check
+    var data = {
+        code:     parsed.id       || parsed.code     || '',
+        name:     parsed.name     || parsed.Name     || '',
+        phone:    parsed.tel      || parsed.phone    || '',
+        role:     parsed.role     || parsed.Role     || '',
+        district: parsed.district || parsed.District || '',
+        chiefdom: parsed.chiefdom || parsed.Chiefdom || '',
+        facility: parsed.facility || parsed.Facility || '',
+        year:     parsed.year     || ''
+    };
+    if (!data.code) {
+        // Use first available string value as code
+        var vals = Object.values(parsed).filter(function(v){ return typeof v==='string' && v.length>0; });
+        if (vals.length) data.code = vals[0];
+    }
     if (mode === 'register') handleRegister(data);
     else handleReturn(data);
 }
