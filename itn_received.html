@@ -23,7 +23,7 @@
             padding: 16px 20px; display: flex; align-items: center; gap: 14px;
             border-bottom: 3px solid var(--gold); box-shadow: 0 4px 14px rgba(0,20,40,0.25);
         }
-        .header-logo { width: 52px; height: 52px; background: white; border-radius: 10px; border: 2px solid var(--gold); overflow: hidden; flex-shrink: 0; }
+        .header-logo { width: 52px; height: 52px; overflow: hidden; flex-shrink: 0; }
         .header-logo img { width: 100%; height: 100%; object-fit: cover; }
         .header-text h1 { font-size: 1.4rem; font-weight: 600; color: white; line-height: 1.2; }
         .header-text p  { font-size: 0.7rem; color: rgba(255,255,255,0.75); text-transform: uppercase; }
@@ -38,7 +38,7 @@
             width: 100%; max-width: 420px; box-shadow: 0 24px 48px rgba(0,0,0,0.4);
             border-top: 6px solid var(--gold);
         }
-        .login-logo-wrap { width: 68px; height: 68px; margin: 0 auto 14px; border-radius: 14px; overflow: hidden; border: 3px solid var(--gold); }
+        .login-logo-wrap { width: 68px; height: 68px; margin: 0 auto 14px; }
         .login-logo-wrap img { width: 100%; height: 100%; object-fit: cover; }
         .login-title  { font-size: 1.3rem; font-weight: 600; color: var(--navy); text-align: center; }
         .login-sub    { font-size: 0.75rem; color: #888; text-align: center; margin: 4px 0 6px; }
@@ -197,25 +197,23 @@
     <div class="login-card">
         <div class="login-logo-wrap">
             <img src="ICF-SL.jpg" alt="ICF-SL"
-                 onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%230B3B5C%22/><text x=%2218%22 y=%2265%22 fill=%22%23E1A534%22 font-size=%2224%22>ICF</text></svg>'">
+                 onerror="this.src='https://github.com/mohamedsillahkanu/gdp-dashboard-2/raw/6c7463b0d5c3be150aafae695a4bcbbd8aeb1499/ICF-SL.jpg';this.onerror=null;">
         </div>
         <div class="login-title">ICF‑SL · PHU RECEIPT</div>
         <div class="login-sub">PHU Staff Login</div>
         <div class="login-divider"></div>
         <div id="loginLoading" style="color:var(--navy);text-align:center;font-size:0.82rem;margin-bottom:10px;">⏳ Loading data…</div>
 
-        <!-- ── Staff credentials ── -->
-        <div class="login-section-label">👤 YOUR LOGIN</div>
-
-        <div class="field">
-            <label class="label">USERNAME <span style="color:var(--red)">*</span></label>
-            <input type="text" class="input" id="loginUser" placeholder="Enter your username" disabled autocapitalize="none" autocorrect="off" spellcheck="false">
-        </div>
-        <div class="field">
-            <label class="label">PASSWORD <span style="color:var(--red)">*</span></label>
-            <div class="pw-wrap">
-                <input type="password" class="input" id="loginPass" placeholder="Enter password" disabled autocapitalize="none">
-                <span class="pw-eye" id="loginEye">👁️</span>
+        <!-- ── QR Login ── -->
+        <div class="login-section-label">👤 SCAN YOUR SBD QR ID CARD</div>
+        <p style="font-size:0.82rem;color:#607080;text-align:center;margin-bottom:12px;">Point camera at your SBD ID QR code to sign in</p>
+        <button class="btn" id="loginScanBtn" onclick="toggleLoginScanner()" style="width:100%;margin-bottom:10px;">
+            📷 SCAN QR ID CARD
+        </button>
+        <div id="loginScannerWrap" style="display:none;margin-bottom:10px;">
+            <div style="border:2px solid var(--navy);border-radius:10px;overflow:hidden;position:relative;">
+                <div id="loginQrReader"></div>
+                <button onclick="stopLoginScanner()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:28px;height:28px;font-size:16px;cursor:pointer;z-index:10;">✕</button>
             </div>
         </div>
 
@@ -252,7 +250,7 @@
     <div class="header">
         <div class="header-logo">
             <img src="ICF-SL.jpg" alt="ICF-SL"
-                 onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%230B3B5C%22/><text x=%2218%22 y=%2265%22 fill=%22%23E1A534%22 font-size=%2224%22>ICF</text></svg>'">
+                 onerror="this.src='https://github.com/mohamedsillahkanu/gdp-dashboard-2/raw/6c7463b0d5c3be150aafae695a4bcbbd8aeb1499/ICF-SL.jpg';this.onerror=null;">
         </div>
         <div class="header-text">
             <h1>ICF‑Sierra Leone</h1>
@@ -403,15 +401,17 @@
                             <div><label class="label">Vehicle Plate</label><input class="input prefilled" readonly id="driverInfoVehicle"></div>
                             <div><label class="label">Username (hidden)</label><input class="input prefilled" readonly id="driverInfoUserMasked" style="letter-spacing:0.3em;font-size:1rem;"></div>
                         </div>
-                        <h4 style="color:var(--navy);margin-bottom:8px;">Type your username to sign off</h4>
-                        <div style="display:flex;gap:8px;">
-                            <div class="pw-wrap" style="flex:1;">
-                                <input type="password" class="input" id="driverConfirmUser" placeholder="Enter username to confirm" autocapitalize="none">
-                                <span class="pw-eye" id="driverEye">👁️</span>
+                        <h4 style="color:var(--navy);margin-bottom:8px;">Scan your QR ID card to sign off</h4>
+                        <button class="btn" id="confirmDriverBtn" onclick="startDriverSignoffScan()" style="width:100%;">
+                            📷 SCAN QR TO CONFIRM
+                        </button>
+                        <div id="driverSignoffScannerWrap" style="display:none;margin-top:10px;">
+                            <div style="border:2px solid var(--navy);border-radius:10px;overflow:hidden;position:relative;">
+                                <div id="driverSignoffQrReader"></div>
+                                <button onclick="stopDriverSignoffScan()" style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:28px;height:28px;font-size:16px;cursor:pointer;z-index:10;">✕</button>
                             </div>
-                            <button class="btn" id="confirmDriverBtn">CONFIRM</button>
                         </div>
-                        <p style="font-size:0.72rem;color:#888;margin-top:6px;">By entering your username, you acknowledge the delivery quantity above.</p>
+                        <p style="font-size:0.72rem;color:#888;margin-top:6px;">Scan your QR card to acknowledge the delivery quantity above.</p>
                     </div>
                     <div id="driverConfirmedCard" style="display:none;">
                         <div class="driver-verified-banner">
@@ -490,110 +490,120 @@ let receipts    = JSON.parse(store.get('phu_receipts','[]'));
 // LOAD cascading_data.csv
 // ═══════════════════════════════════════════
 // ═══════════════════════════════════════════
-// LOAD users_phu.csv
-// ═══════════════════════════════════════════
-let users = [];  // array of user objects from CSV
+// No users CSV — staff identified by QR scan
+let users = [];
 
 async function loadData() {
     const el = document.getElementById('loginLoading');
-    try {
-        el.textContent = '⏳ Loading users…';
-        const res = await fetch('users_phu.csv');
-        if (!res.ok) throw new Error('users_phu.csv not found');
-        const text = await res.text();
-        users = Papa.parse(text, {
-            header: true, skipEmptyLines: true,
-            transformHeader: h => h.replace(/^\uFEFF/,'').trim()
-        }).data;
-
-        // Enable login fields
-        document.getElementById('loginUser').disabled = false;
-        document.getElementById('loginPass').disabled = false;
-        document.getElementById('loginBtn').disabled  = false;
-        document.getElementById('loginBtn').textContent = 'LOGIN';
-        el.style.display = 'none';
-        console.log(`[PHU] Loaded ${users.length} users`);
-    } catch(e) {
-        el.innerHTML = '❌ ' + e.message + ' — ensure users_phu.csv is in the same folder.';
-        el.style.color = 'var(--red)';
-    }
+    el.style.display = 'none';
 }
 
 // ═══════════════════════════════════════════
-// AUTO-FILL LOCATION ON USERNAME TYPE
+// QR LOGIN
 // ═══════════════════════════════════════════
-document.getElementById('loginUser').addEventListener('input', function() {
-    const u = this.value.trim().toLowerCase();
-    const match = users.find(x => x.username && x.username.toLowerCase() === u);
-    const preview = document.getElementById('locationPreview');
-    if (match) {
-        document.getElementById('loginDistrict').value = match.district  || '';
-        document.getElementById('loginChiefdom').value = match.chiefdom  || '';
-        document.getElementById('loginPHU').value      = match.phu       || '';
-        document.getElementById('loginFullName').value = match.full_name || '';
-        preview.style.display = 'block';
+let loginScanner = null;
+
+function parseQR(text) {
+    var parsed = { name:'', id:'', role:'', district:'', chiefdom:'', phu:'', tel:'' };
+    if (text.indexOf('Name:') !== -1 || text.indexOf('ID:') !== -1) {
+        text.split('\n').forEach(function(line) {
+            var sep = line.indexOf(':'); if (sep === -1) return;
+            var k = line.substring(0, sep).trim().toLowerCase();
+            var v = line.substring(sep + 1).trim();
+            if (k === 'name')     parsed.name     = v;
+            if (k === 'id')       parsed.id       = v;
+            if (k === 'role')     parsed.role     = v;
+            if (k === 'district') parsed.district = v;
+            if (k === 'tel')      parsed.tel      = v;
+        });
     } else {
-        preview.style.display = 'none';
+        try {
+            var o = JSON.parse(text);
+            parsed.name = o.name||o.Name||''; parsed.id = o.id||o.ID||text;
+            parsed.role = o.role||o.Role||''; parsed.district = o.district||o.District||'';
+            parsed.tel  = o.tel||o.phone||'';
+        } catch(e) { parsed.id = text.trim(); }
     }
-});
+    return parsed;
+}
 
-// ═══════════════════════════════════════════
-// LOGIN
-// ═══════════════════════════════════════════
-document.getElementById('loginEye').addEventListener('click', function() {
-    const inp = document.getElementById('loginPass');
-    inp.type = inp.type === 'password' ? 'text' : 'password';
-    this.textContent = inp.type === 'password' ? '👁️' : '🔒';
-});
-document.getElementById('loginBtn').addEventListener('click', doLogin);
-document.getElementById('loginUser').addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('loginPass').focus(); });
-document.getElementById('loginPass').addEventListener('keydown', e => { if(e.key==='Enter') doLogin(); });
+function toggleLoginScanner() {
+    var wrap = document.getElementById('loginScannerWrap');
+    if (wrap.style.display === 'none') {
+        wrap.style.display = 'block';
+        document.getElementById('loginScanBtn').textContent = '⏹ STOP SCANNER';
+        loginScanner = new Html5Qrcode('loginQrReader');
+        loginScanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 220, height: 220 } },
+            function(decoded) {
+                stopLoginScanner();
+                doLogin(decoded.trim());
+            },
+            function() {}
+        ).catch(function() {
+            showErr('Camera access denied.');
+            wrap.style.display = 'none';
+        });
+    } else { stopLoginScanner(); }
+}
 
-function doLogin() {
-    const username = document.getElementById('loginUser').value.trim();
-    const password = document.getElementById('loginPass').value.trim();
-    const errEl    = document.getElementById('loginErr');
+function stopLoginScanner() {
+    if (loginScanner) { loginScanner.stop().catch(function(){}); loginScanner = null; }
+    document.getElementById('loginScannerWrap').style.display = 'none';
+    document.getElementById('loginScanBtn').textContent = '📷 SCAN QR ID CARD';
+}
+
+function doLogin(qrText) {
+    var errEl = document.getElementById('loginErr');
     errEl.style.display = 'none';
+    if (!qrText) { showErr('No QR data received.'); return; }
 
-    if (!username || !password) {
-        errEl.textContent = 'Enter your username and password';
-        errEl.style.display = 'block'; return;
+    var parsed = parseQR(qrText);
+    if (!parsed.name) { showErr('Could not read name from QR. Use your SBD ID card.'); return; }
+
+    // Role check — only PHU Staff allowed
+    if (!parsed.role) { showErr('Role not found in QR. Use your SBD ID card.'); return; }
+    if (parsed.role !== 'PHU Staff') {
+        showErr('Access denied. You do not have permission to access this app. Only PHU Staff can sign in.');
+        return;
     }
 
-    const user = users.find(x =>
-        x.username && x.username.toLowerCase() === username.toLowerCase() &&
-        x.password === password &&
-        x.role === 'PHU Staff'
-    );
-
-    if (!user) {
-        errEl.textContent = 'Incorrect username or password. Try again.';
-        errEl.style.display = 'block'; return;
-    }
+    // Show location preview from QR data
+    document.getElementById('loginDistrict').value = parsed.district || '';
+    document.getElementById('loginChiefdom').value = parsed.chiefdom || '';
+    document.getElementById('loginPHU').value      = parsed.phu      || parsed.district || '';
+    document.getElementById('loginFullName').value = parsed.name;
+    document.getElementById('locationPreview').style.display = 'block';
 
     currentUser = {
-        username:  user.username,
-        full_name: user.full_name,
-        district:  user.district,
-        chiefdom:  user.chiefdom,
-        phu:       user.phu,
-        phone:     user.phone || ''
+        username:  parsed.id   || parsed.name,
+        full_name: parsed.name,
+        district:  parsed.district || '',
+        chiefdom:  parsed.chiefdom || '',
+        phu:       parsed.phu      || '',
+        phone:     parsed.tel      || ''
     };
 
     document.getElementById('loginOverlay').style.display = 'none';
     document.getElementById('appMain').style.display = 'block';
-    document.getElementById('staffName').textContent     = user.full_name;
-    document.getElementById('staffLocation').textContent = `${user.district} · ${user.chiefdom} · ${user.phu}`;
+    document.getElementById('staffName').textContent     = parsed.name;
+    document.getElementById('staffLocation').textContent =
+        [parsed.district, parsed.chiefdom, parsed.phu].filter(Boolean).join(' · ') || parsed.name;
     renderRecords();
 }
 
-document.getElementById('logoutBtn').addEventListener('click', () => {
-    stopScan(); currentUser = null;
+function showErr(msg) {
+    var el = document.getElementById('loginErr');
+    el.textContent = msg; el.style.display = 'block';
+}
+
+document.getElementById('logoutBtn').addEventListener('click', function() {
+    stopScan(); stopLoginScanner(); currentUser = null;
     document.getElementById('loginOverlay').style.display = 'flex';
     document.getElementById('appMain').style.display = 'none';
-    document.getElementById('loginUser').value = '';
-    document.getElementById('loginPass').value = '';
     document.getElementById('locationPreview').style.display = 'none';
+    document.getElementById('loginErr').style.display = 'none';
     resetAll();
 });
 
@@ -816,21 +826,48 @@ function renderDriverStep() {
         document.getElementById('driverAccountabilityNotice').innerHTML=`<div class="accountability-box"><h4>⚠ ACCOUNTABILITY NOTICE</h4><p>Discrepancy of <strong>${Math.abs(variance)} ITNs</strong>. Driver <strong>${scannedData.driverName||'—'}</strong> must enter their username to acknowledge.</p></div>`;
     }
     document.getElementById('driverConfirmedCard').style.display='none';
-    document.getElementById('driverConfirmUser').value='';
 }
-document.getElementById('driverEye').addEventListener('click', function(){const inp=document.getElementById('driverConfirmUser');inp.type=inp.type==='password'?'text':'password';this.textContent=inp.type==='password'?'👁️':'🔒';});
-document.getElementById('confirmDriverBtn').addEventListener('click', confirmDriver);
-document.getElementById('driverConfirmUser').addEventListener('keydown', e=>{if(e.key==='Enter')confirmDriver();});
-function confirmDriver(){
-    const u=document.getElementById('driverConfirmUser').value.trim();
-    if(!u){showToast('Enter your username','error');return;}
-    if(u!==scannedData.driverUsername){showToast('Username does not match — try again','error');return;}
-    driverUser={username:u,full_name:scannedData.driverName,phone:scannedData.driverPhone};
-    document.getElementById('confirmedDriverName').textContent=scannedData.driverName;
-    document.getElementById('confirmedDriverDetails').textContent=`${u} · ${scannedData.vehiclePlate} · ${scannedData.driverPhone||''}`;
-    document.getElementById('driverConfirmedCard').style.display='block';
-    showToast('Driver confirmed — ready to finalise','success');
+// Driver sign-off via QR scan
+var driverSignoffScanner = null;
+
+function startDriverSignoffScan() {
+    var wrap = document.getElementById('driverSignoffScannerWrap');
+    wrap.style.display = 'block';
+    document.getElementById('confirmDriverBtn').style.display = 'none';
+    driverSignoffScanner = new Html5Qrcode('driverSignoffQrReader');
+    driverSignoffScanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 200, height: 200 } },
+        function(decoded) {
+            stopDriverSignoffScan();
+            confirmDriverByQR(decoded.trim());
+        },
+        function() {}
+    ).catch(function() {
+        wrap.style.display = 'none';
+        document.getElementById('confirmDriverBtn').style.display = 'block';
+    });
 }
+
+function stopDriverSignoffScan() {
+    if (driverSignoffScanner) { driverSignoffScanner.stop().catch(function(){}); driverSignoffScanner = null; }
+    document.getElementById('driverSignoffScannerWrap').style.display = 'none';
+}
+
+function confirmDriverByQR(qrText) {
+    var parsed = parseQR(qrText);
+    var name = parsed.name || scannedData.driverName || 'Unknown';
+    driverUser = { username: parsed.id || name, full_name: name, phone: parsed.tel || scannedData.driverPhone || '' };
+    document.getElementById('confirmedDriverName').textContent = name + ' confirmed';
+    document.getElementById('confirmedDriverDetails').textContent =
+        (scannedData.vehiclePlate || '') + (parsed.tel ? ' · ' + parsed.tel : '');
+    document.getElementById('driverConfirmedCard').style.display = 'block';
+    document.getElementById('driverConfirmSection').style.display = 'none';
+    showToast('Driver confirmed — ready to finalise', 'success');
+}
+
+// Legacy no-op
+function confirmDriver() {}
 
 // ═══════════════════════════════════════════
 // FINALISE & SAVE
