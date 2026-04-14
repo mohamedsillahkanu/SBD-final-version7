@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -409,18 +409,36 @@
                     <p class="subtitle">Insecticide-Treated Nets Distribution Survey - Sierra Leone</p>
                 </div>
 
-                <!-- PARTNER LOGOS -->
+                <!-- PARTNER LOGOS — 2 rows x 3 cols -->
                 <div class="partners-section">
                     <div class="partners-label">IMPLEMENTING PARTNERS</div>
-                    <div class="partners-grid">
+                    <div class="partners-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+                        <div class="partner-logo-card">
+                            <div class="partner-logo-img">
+                                <img src="logo_usaid.png" alt="U.S. Department of State" style="display:none;visibility:hidden;"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                     onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
+                                <div class="logo-placeholder-box">USAID</div>
+                            </div>
+                            <span class="partner-name">United States Dept.</span>
+                        </div>
+                        <div class="partner-logo-card">
+                            <div class="partner-logo-img">
+                                <img src="logo_gf.png" alt="Global Fund" style="display:none;visibility:hidden;"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                     onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
+                                <div class="logo-placeholder-box">GF</div>
+                            </div>
+                            <span class="partner-name">Global Fund</span>
+                        </div>
                         <div class="partner-logo-card">
                             <div class="partner-logo-img">
                                 <img src="logo_mohs.png" alt="Ministry of Health" style="display:none;visibility:hidden;"
                                      onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
                                      onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
-                                <div class="logo-placeholder-box">MoHS</div>
+                                <div class="logo-placeholder-box">MOH</div>
                             </div>
-                            <span class="partner-name">Ministry of Health</span>
+                            <span class="partner-name">MOH</span>
                         </div>
                         <div class="partner-logo-card">
                             <div class="partner-logo-img">
@@ -439,6 +457,15 @@
                                 <div class="logo-placeholder-box">PMI</div>
                             </div>
                             <span class="partner-name">PMI Evolve</span>
+                        </div>
+                        <div class="partner-logo-card">
+                            <div class="partner-logo-img">
+                                <img src="logo_mbsse.png" alt="MBSSE" style="display:none;visibility:hidden;"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';"
+                                     onload="this.style.display='block'; this.nextElementSibling.style.display='none';">
+                                <div class="logo-placeholder-box">MBSSE</div>
+                            </div>
+                            <span class="partner-name">MBSSE</span>
                         </div>
                     </div>
                 </div>
@@ -613,13 +640,6 @@
                             <small style="font-size:8px;opacity:.7;display:block;line-height:1.2;">(PMI/NMCP)</small>
                         </button>
 
-                        <button class="app-tab t10-green" id="viewSummaryBtn" onclick="guardedAction('summary')" title="School Coverage Summary">
-                            <span class="tab-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
-                            <svg viewBox="0 0 24 24"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
-                            SUMMARY
-                            <small style="font-size:8px;opacity:.7;display:block;line-height:1.2;">(PMI/NMCP)</small>
-                        </button>
-
                         <button class="app-tab t10-navy" id="aiAgentBtn" onclick="guardedAction('ai')" title="AI Data Agent">
                             <span class="tab-lock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg></span>
                             <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/><circle cx="9" cy="10" r="1" fill="white" stroke="none"/><circle cx="12" cy="10" r="1" fill="white" stroke="none"/><circle cx="15" cy="10" r="1" fill="white" stroke="none"/></svg>
@@ -743,7 +763,6 @@
                         viewData:       'admin123',   // VIEW DATA
                         download:       'admin123',   // DOWNLOAD
                         analysis:       'admin123',   // ANALYSIS
-                        summary:        'admin123',   // SUMMARY
                         ai:             'admin123',   // AI AGENT
                         // ── Module tabs ────────────────────────────────────
                         monitoring:     'admin123',   // MONITORING
@@ -832,7 +851,6 @@
                     function _executeAction(action) {
                         if (action === 'viewData')       { window.open('https://docs.google.com/spreadsheets/d/1cXlYiTMzcRP1BCj9mt1JXoK_pjgWbRtDEEQUPMg2HPs/edit?usp=sharing','_blank'); }
                         else if (action === 'analysis')  { window.openAnalysisModal && window.openAnalysisModal(); }
-                        else if (action === 'summary')   { window.openSummaryModal && window.openSummaryModal(); }
                         else if (action === 'ai')        { window.icfAiOpen && window.icfAiOpen(); }
                         // Module tabs
                         else if (action === 'dataentry') { window.openDataEntry && window.openDataEntry(); }
@@ -1391,7 +1409,7 @@
         { id:'schoolqr',       file:'school_qr_generator.html',  label:'School QR Generator',    icon:'M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3M17 14v3M14 17h3',                                                color:'#59a14f', dark:'#3d7a35' },
         { id:'idcards',        file:'id_cards.html',             label:'ID Cards',               icon:'M2 5h20v14H2zM8 12a2 2 0 100-4 2 2 0 000 4zM14 10h4M14 14h4',                                                     color:'#4e79a7', dark:'#3a5f8a' },
         { id:'devicetag',      file:'device_tag.html',           label:'Device Tag',             icon:'M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82zM7 7h.01',                       color:'#76b7b2', dark:'#5a9a95' },
-        { id:'device',         file:'device_tracking2.html',      label:'Device Tracking',        icon:'M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z',                                    color:'#d4ae30', dark:'#b89520' },
+        { id:'device',         file:'device_tracking.html',      label:'Device Tracking',        icon:'M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z',                                    color:'#d4ae30', dark:'#b89520' },
         { id:'movement',       file:'itn_movement.html',         label:'ITN Movement',           icon:'M5 12h14M12 5l7 7-7 7',                                                                                            color:'#ff9da7', dark:'#e8818c' },
         { id:'itnreceived',    file:'itn_received.html',         label:'ITN Received',            icon:'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3',                                                    color:'#2196F3', dark:'#1565C0' },
         { id:'attendance',     file:'attendance_payment.html',   label:'Attendance & Payment',   icon:'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 7a4 4 0 100 8 4 4 0 000-8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75', color:'#c8991a', dark:'#a07a10' },
