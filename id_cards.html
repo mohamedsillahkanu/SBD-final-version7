@@ -186,7 +186,7 @@
         <div class="sec-hdr"><span class="sec-num">4</span><span class="sec-lbl">LOCATION <span style="color:#ffc107;">*</span></span></div>
 
         <!-- District dropdown (shown for non-cascading roles) -->
-        <div id="districtRadioWrap" class="fg">
+        <div id="districtRadioWrap" class="fg" style="display:none;">
             <label class="fl">District <span class="req">*</span></label>
             <select class="fs" id="districtSelect" onchange="updatePreview()" required>
                 <option value="" disabled selected>— Select District —</option>
@@ -198,7 +198,7 @@
         </div>
 
         <!-- Cascading dropdowns (shown for PHU Staff and Teacher) -->
-        <div id="cascadeWrap" style="display:none;">
+        <div id="cascadeWrap">
             <div class="fg">
                 <label class="fl">District <span class="req">*</span></label>
                 <select class="fs" id="cas-district" onchange="cascadeChiefdom()">
@@ -213,7 +213,7 @@
                 </select>
                 <div class="cascade-cnt" id="cnt-chiefdom"></div>
             </div>
-            <div class="fg">
+            <div class="fg" id="facilityWrap" style="display:none;">
                 <label class="fl">Health Facility <span class="req">*</span></label>
                 <select class="fs" id="cas-facility" disabled onchange="updatePreview()">
                     <option value="">— Select Facility —</option>
@@ -283,8 +283,8 @@
 <script>
 var GAS_URL = "https://script.google.com/macros/s/AKfycbwZoVy_5LQNFuaTb0N_69CF9fc40usq6zhdWCQQorhKPAc7yEov4oo2C_DIF4JlbLwQ/exec";
 var NMCP_LOGO = 'NMCP.png';
-var CASCADE_CSV = 'dms_cascading.csv';
-var CASCADE_ROLES = ['PHU Staff', 'Teacher'];
+var CASCADE_CSV = 'cascading_data.csv';
+var CASCADE_ROLES = ['National Monitor','SQOs','District Supervisor','Chiefdom Supervisor','Conveyor','DHMT','PHU Staff','Teacher'];
 
 var uploadedPhoto = null;
 var cameraStream  = null;
@@ -325,9 +325,13 @@ window.addEventListener('DOMContentLoaded', function() {
 /* ── ROLE CHANGE ── */
 function onRoleChange() {
     var role = document.getElementById('roleSelect').value;
-    var useCascade = CASCADE_ROLES.indexOf(role) !== -1;
-    document.getElementById('districtRadioWrap').style.display = useCascade ? 'none' : 'block';
-    document.getElementById('cascadeWrap').style.display       = useCascade ? 'block' : 'none';
+    var showFacility = (role === 'PHU Staff' || role === 'Teacher');
+    // All roles use cascade for District + Chiefdom
+    document.getElementById('districtRadioWrap').style.display = 'none';
+    document.getElementById('cascadeWrap').style.display       = 'block';
+    // Only PHU Staff and Teacher see Facility
+    var facWrap = document.getElementById('facilityWrap');
+    if (facWrap) facWrap.style.display = showFacility ? 'block' : 'none';
     updatePreview();
 }
 
